@@ -15,7 +15,7 @@ Marketplace plugin that ships the **whatsapp-bridge** agent skill plus the runna
 
 ## Runtime: WhatsApp Baileys HTTP bridge
 
-Standalone extract of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) `scripts/whatsapp-bridge` (MIT), plus a **zero-LLM** allowlist listener and optional **webhook wake** for agent replies.
+Based on [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) `scripts/whatsapp-bridge` (MIT); this repo adds a **zero-LLM** allowlist listener, optional **webhook wake**, and skill packaging.
 
 > Unofficial WhatsApp Web API (Baileys). Prefer a dedicated spare number. Do not bulk-spam. Bind to loopback and reach it only via Tailscale / SSH tunnel / authenticated reverse proxy — never expose the bridge port to the public internet.
 
