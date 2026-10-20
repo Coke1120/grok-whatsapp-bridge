@@ -1,0 +1,9 @@
+node_modules/
+session/
+.env
+inbox.jsonl
+unread.flag
+listener-state.json
+pair-qr.png
+*.log
+.DS_Store

@@ -1,0 +1,7 @@
+WhatsApp Baileys bridge core extracted from NousResearch/hermes-agent
+(scripts/whatsapp-bridge), MIT License.
+Upstream: https://github.com/NousResearch/hermes-agent
+
+This repository adds a programmatic allowlist listener, optional webhook wake,
+and packaging for agent skills. Unofficial WhatsApp Web API — ban risk; use a
+spare number; no bulk spam.

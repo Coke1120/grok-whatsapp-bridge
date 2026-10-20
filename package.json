@@ -1,0 +1,35 @@
+{
+  "name": "grok-whatsapp-bridge",
+  "version": "1.0.0",
+  "description": "Standalone WhatsApp Baileys HTTP bridge with allowlist listener and optional webhook wake (extracted from Hermes Agent)",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "start": "node bridge.js",
+    "pair": "./pair.sh",
+    "listener": "./start-listener.sh"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc13",
+    "express": "^4.21.0",
+    "qrcode-terminal": "^0.12.0",
+    "pino": "^9.0.0"
+  },
+  "overrides": {
+    "protobufjs": "^7.5.5",
+    "body-parser": "1.20.8"
+  },
+  "license": "MIT",
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "bridge",
+    "webhook",
+    "grok-bot"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Coke1120/grok-whatsapp-bridge.git"
+  },
+  "homepage": "https://github.com/Coke1120/grok-whatsapp-bridge"
+}
