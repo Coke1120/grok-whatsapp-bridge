@@ -1,0 +1,15 @@
+{
+  "name": "grok-whatsapp-bridge",
+  "displayName": "WhatsApp Baileys Bridge",
+  "version": "1.0.0",
+  "description": "Pair and drive WhatsApp via a local Baileys HTTP bridge: zero-LLM allowlist listener, optional webhook wake, draft-then-send rules. Not Meta Cloud API.",
+  "author": {
+    "name": "Leo Ho",
+    "email": "leo@hkbscl.com"
+  },
+  "homepage": "https://github.com/Coke1120/grok-whatsapp-bridge",
+  "repository": "https://github.com/Coke1120/grok-whatsapp-bridge",
+  "license": "MIT",
+  "keywords": ["whatsapp", "baileys", "bridge", "webhook", "messaging", "grok-bot"],
+  "logo": "assets/logo.svg"
+}

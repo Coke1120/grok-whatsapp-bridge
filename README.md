@@ -1,4 +1,19 @@
-# WhatsApp Baileys HTTP bridge
+# grok-whatsapp-bridge (Grok Bot / Cursor plugin)
+
+Marketplace plugin that ships the **whatsapp-bridge** agent skill plus the runnable Baileys HTTP bridge sources in this repo.
+
+| Piece | What you get |
+|-------|----------------|
+| Plugin skill | `skills/whatsapp-bridge/SKILL.md` — when/how to pair, send, listen, wake |
+| Bridge runtime | `bridge.js` + `listener.mjs` — run on your always-on host (loopback / Tailscale only) |
+
+**Install (after marketplace approval):** search Marketplace for `grok-whatsapp-bridge`, or install from this public GitHub repo.
+
+**Not included:** session credentials, real `.env`, inbox history, or phone numbers.
+
+---
+
+## Runtime: WhatsApp Baileys HTTP bridge
 
 Standalone extract of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) `scripts/whatsapp-bridge` (MIT), plus a **zero-LLM** allowlist listener and optional **webhook wake** for agent replies.
 
