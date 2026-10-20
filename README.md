@@ -55,6 +55,14 @@ curl -s http://127.0.0.1:3100/health
 
 Do **not** cron-poll the agent just to watch WhatsApp.
 
+## Reconnect vs outer watchdog
+
+Socket drops (often reason **408**) are handled **inside** `bridge.js`: wait a few seconds and `startSocket()` again. `loggedOut` exits and needs a manual re-pair.
+
+An optional **outer** watchdog only restarts the process if Node died or `/health` stays not `connected` for minutes — it must never delete `session/`.
+
+Details: [docs/reconnect.md](docs/reconnect.md). Pasteable agent instructions: [docs/bot-prompt-reconnect.example.md](docs/bot-prompt-reconnect.example.md).
+
 ## Environment
 
 See `.env.example`. Important:
