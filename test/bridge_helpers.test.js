@@ -5,6 +5,7 @@ import {
   createReconnectScheduler,
   readReconnectTiming,
   redactWhatsAppId,
+  resolveListenHost,
 } from '../bridge_helpers.js';
 
 function createClock() {
@@ -97,6 +98,21 @@ test('reconnect delay doubles from 3s to a 60s cap, with jitter around the cente
   assert.equal(computeReconnectDelayMs(0, { random: () => 1 }), 3600);
   assert.equal(computeReconnectDelayMs(5, { random: () => 1 }), 60000);
   assert.equal(computeReconnectDelayMs(0, { baseMs: 3000, capMs: 1000, random: () => 0.5 }), 1000);
+});
+
+test('listen host stays on loopback unless the container wildcard is set', () => {
+  assert.equal(resolveListenHost({}), '127.0.0.1');
+  assert.equal(resolveListenHost({ WHATSAPP_BIND_HOST: '' }), '127.0.0.1');
+  assert.equal(resolveListenHost({ WHATSAPP_BIND_HOST: '  0.0.0.0  ' }), '0.0.0.0');
+  assert.equal(resolveListenHost({ WHATSAPP_BIND_HOST: '::1' }), '::1');
+  assert.throws(
+    () => resolveListenHost({ WHATSAPP_BIND_HOST: '192.168.1.9' }),
+    /WHATSAPP_BIND_HOST/,
+  );
+  assert.throws(
+    () => resolveListenHost({ WHATSAPP_BIND_HOST: 'localhost' }),
+    /WHATSAPP_BIND_HOST/,
+  );
 });
 
 test('reconnect timing env knobs fall back to 3s and 60s', () => {

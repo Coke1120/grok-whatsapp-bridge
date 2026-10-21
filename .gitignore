@@ -10,3 +10,5 @@ listener-state.json
 pair-qr.png
 *.log
 .DS_Store
+docker-compose.override.yml
+compose.override.yml

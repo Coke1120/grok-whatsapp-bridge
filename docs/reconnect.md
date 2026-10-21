@@ -47,6 +47,8 @@ Allowed auto-actions:
 
 Never without explicit owner approval: logout, wipe `session/`, change allowlist, change webhook secrets, bulk `/send`.
 
+Docker's `restart: unless-stopped` is this outer restart. The image healthcheck only checks that `GET /health` returns HTTP 200, including while status is `connecting` or waiting for a QR, so a short 408 does not recreate the container. Do not delete the `wa-session` / `wa-sessions` volumes. See [docker-synology.md](docker-synology.md).
+
 ## Multi-account
 
 Each configured account has its own socket, reconnect timer, and attempt counter. A 408 on one account does not delay the others. Separate bridge processes can still see the same 408/428 burst when the network is noisy; per-account counters do not assume a second process is the cause. See [ADR 0001](./adr/0001-multi-account-single-process.md).

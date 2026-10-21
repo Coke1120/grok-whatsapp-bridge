@@ -47,6 +47,22 @@ curl -s http://127.0.0.1:3100/health
 ./start-listener.sh    # optional: allowlist poll + inbox.jsonl + webhook
 ```
 
+## Docker (Synology and other hosts)
+
+`./start.sh`, `./pair.sh`, and `./start-listener.sh` stay the bare-metal path. `Dockerfile` and `docker-compose.yml` are an extra way to run the same processes.
+
+**Never publish the bridge to the open internet.** Compose maps `127.0.0.1:3100` on the host only. Do not change that to `3100:3100`, do not forward the port, and do not use Tailscale Funnel. The HTTP API has no login.
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose logs -f bridge    # first QR; session stays on the wa-session volume
+curl -sS http://127.0.0.1:3100/health
+docker compose --profile listener up -d
+```
+
+Full steps (Container Manager, Tailscale / SSH, one-shot pair, upgrade without wiping `session/`, multi-account volumes): [docs/docker-synology.md](docs/docker-synology.md).
+
 ## Token model
 
 | Layer | Role | LLM tokens |
@@ -97,6 +113,7 @@ See `.env.example`. Important:
 
 - `WHATSAPP_ALLOWED_USERS` — required for inbound; empty means nobody is accepted
 - `WHATSAPP_MODE` — `bot` (recommended) or `self-chat`
+- `WHATSAPP_BIND_HOST` — leave unset on bare metal (`127.0.0.1`). Docker sets `0.0.0.0` inside the container and still publishes loopback on the host.
 - `WHATSAPP_WAKE_WEBHOOK_URL` / `WHATSAPP_WAKE_WEBHOOK_AUTH` — optional agent wake
 - `WHATSAPP_PROGRAMMATIC_ACK` — fixed ack text; empty = off
 - `session/` — **secret**; never commit

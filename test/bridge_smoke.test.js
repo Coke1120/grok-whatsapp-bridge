@@ -74,6 +74,67 @@ async function waitForHealth(port, bridge) {
   throw new Error(`health never responded (${lastError?.message}). ${bridge.output()}`);
 }
 
+function singleEnv(dir, extra = {}) {
+  return {
+    ...process.env,
+    WHATSAPP_ACCOUNTS: '',
+    WHATSAPP_DEFAULT_ACCOUNT: '',
+    WHATSAPP_ACCOUNT: '',
+    WHATSAPP_ACCOUNTS_DIR: path.join(dir, 'no-accounts'),
+    WHATSAPP_ALLOWED_USERS: '',
+    WHATSAPP_MODE: 'bot',
+    WHATSAPP_BIND_HOST: '',
+    ...extra,
+  };
+}
+
+test('wildcard bind still answers loopback /health', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-smoke-bind-'));
+  const session = path.join(dir, 'session');
+  const port = freePort();
+  const bridge = startBridge(
+    ['--port', String(port), '--session', session, '--mode', 'bot'],
+    singleEnv(dir, { WHATSAPP_BIND_HOST: '0.0.0.0' }),
+  );
+  try {
+    const health = await waitForHealth(port, bridge);
+    assert.equal(health.status, 200);
+    assert.equal(health.json.session, session);
+    const logDeadline = Date.now() + 2000;
+    while (Date.now() < logDeadline && !/HTTP bind 0\.0\.0\.0:/.test(bridge.output())) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.match(bridge.output(), /HTTP bind 0\.0\.0\.0:/);
+  } finally {
+    await stopBridge(bridge.child);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a concrete LAN bind address exits before listen', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-smoke-bind-reject-'));
+  const session = path.join(dir, 'session');
+  const port = freePort();
+  const bridge = startBridge(
+    ['--port', String(port), '--session', session, '--mode', 'bot'],
+    singleEnv(dir, { WHATSAPP_BIND_HOST: '192.168.1.9' }),
+  );
+  try {
+    const exit = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve('timeout'), 20000);
+      bridge.child.once('exit', (code) => {
+        clearTimeout(timer);
+        resolve(code);
+      });
+    });
+    assert.equal(exit, 1);
+    assert.match(bridge.output(), /WHATSAPP_BIND_HOST/);
+  } finally {
+    await stopBridge(bridge.child);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('default config serves the legacy single-session health shape', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-smoke-single-'));
   const session = path.join(dir, 'session');
@@ -88,6 +149,7 @@ test('default config serves the legacy single-session health shape', async () =>
       WHATSAPP_ACCOUNTS_DIR: path.join(dir, 'no-accounts'),
       WHATSAPP_ALLOWED_USERS: '',
       WHATSAPP_MODE: 'bot',
+      WHATSAPP_BIND_HOST: '',
     },
   );
   try {
@@ -134,6 +196,7 @@ test('configured accounts are listed and selectable without changing the default
       WHATSAPP_ACCOUNTS_DIR: path.join(dir, 'no-accounts'),
       WHATSAPP_ALLOWED_USERS: '',
       WHATSAPP_MODE: 'bot',
+      WHATSAPP_BIND_HOST: '',
     },
   );
   try {
