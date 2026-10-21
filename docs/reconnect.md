@@ -17,7 +17,9 @@ Baileys emits `connection.update`. On `connection === 'close'`:
 
 Session files stay on disk, so a normal 408 usually **does not** need a new QR.
 
-Relevant code: `createReconnectScheduler` in `bridge_helpers.js`; `connection.update` handler in `account_runtime.js`.
+A **408** after `WhatsApp connected` is that normal reconnect. A **408** on a first link that has never printed a QR is a different failure: the WebSocket closed before Baileys could emit `qr` (a **428** before any QR is the same stage). `curl https://web.whatsapp.com` can still return HTTP 200; that check does not open the pairing socket. The bridge then logs one line, `Pairing may be stuck — WhatsApp WSS likely failing before QR (check container egress).` Reconnects keep the backoff in the table and do not repeat that line. A later QR clears the latch, so one new pre-QR close can log it again. After the account has connected, paired 408s follow this table only. Container DNS, firewall, Safe Access, AdGuard, and VPN checks: [No QR, only 408](docker-synology.md#no-qr-only-408).
+
+Relevant code: `createReconnectScheduler` and `createPreQrCloseHint` in `bridge_helpers.js`; `connection.update` handler in `account_runtime.js`.
 
 The listener treats HTTP **408** / **503**, a "not connected" body, and health states `disconnected` / `connecting` / `reconnecting` as a reconnect window. It retries that poll a few times (about 250ms, 500ms, 1s), warns **once**, and keeps polling. `logged_out`, `paused`, and other HTTP errors are not retried. A successful poll clears the warning.
 

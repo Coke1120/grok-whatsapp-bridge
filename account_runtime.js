@@ -22,11 +22,13 @@ import { classifyOwnerMessageGate } from './owner_message_gate.js';
 import {
   addMentions,
   buildPollPayload,
+  createPreQrCloseHint,
   createReconnectScheduler,
   DEFAULT_RECONNECT_BASE_MS,
   DEFAULT_RECONNECT_CAP_MS,
   DEFAULT_RECONNECT_JITTER_RATIO,
   formatReconnectDelay,
+  PRE_QR_EGRESS_HINT,
   buildLocationPayload,
   buildTextSendPayload,
   createBoundedMessageStore,
@@ -91,6 +93,9 @@ export function createAccountRuntime(options) {
   const createSocket = deps.makeWASocket || makeWASocket;
   const downloadMedia = deps.downloadMediaMessage || downloadMediaMessage;
   const getVersion = deps.getWAVersion || (async () => null);
+  const renderQr = deps.renderQr || ((value) => {
+    qrcode.generate(value, { small: true }, (code) => process.stdout.write(`${code}\n`));
+  });
   const exitProcess = deps.exitProcess || ((code) => process.exit(code));
   const writeLog = options.log || ((text) => console.log(text));
   const writeWarn = options.warn || ((text) => console.warn(text));
@@ -130,6 +135,7 @@ export function createAccountRuntime(options) {
   let logoutRequested = false;
   let saveAllowed = true;
   let epoch = 0;
+  const preQrCloseHint = createPreQrCloseHint();
 
   function emitPairEvent(event) {
     if (!pairJson) return;
@@ -306,11 +312,12 @@ export function createAccountRuntime(options) {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
+        preQrCloseHint.noteQr();
         if (pairJson) {
           emitPairEvent({ event: 'qr', qr });
         } else {
           log('\n📱 Scan this QR code with WhatsApp on your phone:\n');
-          qrcode.generate(qr, { small: true }, (code) => process.stdout.write(`${code}\n`));
+          renderQr(qr);
           log('\nWaiting for scan...\n');
         }
       }
@@ -339,10 +346,12 @@ export function createAccountRuntime(options) {
           if (restartRequested) log('↻ WhatsApp requested restart (code 515). Reconnecting...');
           else log(`⚠️  Connection closed (reason: ${reason}). Reconnecting in ${formatReconnectDelay(delayMs)}...`);
         }
+        if (preQrCloseHint.consume(reason) && !pairJson) log(PRE_QR_EGRESS_HINT);
         return;
       }
 
       if (connection === 'open') {
+        preQrCloseHint.noteOpen();
         scheduleReconnect.noteOpen();
         connectionState = 'connected';
         const connectedUser = created.user
@@ -668,6 +677,7 @@ export function createAccountRuntime(options) {
 
     const { state, saveCreds } = await useAuthState(sessionDir);
     if (stopReconnect || myEpoch !== epoch) return;
+    preQrCloseHint.noteSocketAttempt(state?.creds);
     const version = await getVersion();
     if (stopReconnect || myEpoch !== epoch) return;
 
@@ -740,6 +750,7 @@ export function createAccountRuntime(options) {
     logoutRequested = true;
     stopReconnect = true;
     saveAllowed = false;
+    preQrCloseHint.resetAfterLogout();
     epoch += 1;
     scheduleReconnect.cancel();
     connectionState = 'logged_out';

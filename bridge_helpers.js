@@ -728,6 +728,60 @@ export function readReconnectTiming(env = process.env) {
   };
 }
 
+/**
+ * Logged once when a not-yet-linked socket dies before Baileys emits a QR.
+ * 408 is connectionLost and timedOut (including ENOTFOUND / ETIMEDOUT mapped
+ * by Baileys). 428 is the websocket closing before the pair-device IQ.
+ */
+export const PRE_QR_EGRESS_HINT = '⚠️  Pairing may be stuck — WhatsApp WSS likely failing before QR (check container egress).';
+
+const PRE_QR_CLOSE_REASONS = new Set([408, 428]);
+
+function credsArePaired(creds) {
+  return creds?.registered === true || !!creds?.me?.id;
+}
+
+/**
+ * One actionable line per stuck first link. `consume` latches after logging.
+ * `noteQr` and `noteOpen` clear that latch. `noteOpen` also records that this
+ * runtime has connected, so a later reconnect without a QR stays on normal
+ * backoff. Paired creds (`registered` or `me.id`) never hint.
+ * `resetAfterLogout` clears that state for a later in-process re-pair.
+ */
+export function createPreQrCloseHint() {
+  let attemptSawQr = false;
+  let hintLogged = false;
+  let reachedOpen = false;
+  let paired = false;
+
+  return {
+    noteSocketAttempt(creds) {
+      attemptSawQr = false;
+      paired = credsArePaired(creds);
+    },
+    noteQr() {
+      attemptSawQr = true;
+      hintLogged = false;
+    },
+    noteOpen() {
+      reachedOpen = true;
+      hintLogged = false;
+    },
+    resetAfterLogout() {
+      attemptSawQr = false;
+      hintLogged = false;
+      reachedOpen = false;
+      paired = false;
+    },
+    consume(reason) {
+      if (attemptSawQr || hintLogged || reachedOpen || paired) return false;
+      if (!PRE_QR_CLOSE_REASONS.has(reason)) return false;
+      hintLogged = true;
+      return true;
+    },
+  };
+}
+
 export function formatReconnectDelay(delayMs) {
   const ms = Math.max(0, Number(delayMs) || 0);
   if (ms < 1000) return `${Math.round(ms)}ms`;
