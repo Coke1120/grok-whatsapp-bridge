@@ -58,6 +58,10 @@ nohup ./start-listener.sh > /tmp/wa-listener.log 2>&1 &
 | `WHATSAPP_WAKE_WEBHOOK_URL` | routine webhook URL (secret form) |
 | `WHATSAPP_WAKE_WEBHOOK_AUTH` | `Bearer …` only (strip leading `Authorization:` if the panel gave the full header) |
 | `WHATSAPP_POLL_MS` | listener poll interval (default 2000) |
+| `WHATSAPP_RECONNECT_BASE_MS` | first non-logout reconnect delay (default 3000) |
+| `WHATSAPP_RECONNECT_CAP_MS` | backoff cap (default 60000) |
+| `WHATSAPP_ACCOUNTS` | optional JSON or path; unset = single session |
+| `WHATSAPP_DEFAULT_ACCOUNT` | which account unqualified `/send` and `/messages` use |
 
 Collect URL/auth via a masked secret form — never ask the user to paste secrets in chat.
 
@@ -65,7 +69,7 @@ Collect URL/auth via a masked secret form — never ask the user to paste secret
 
 Files: `listener.mjs`, `start-listener.sh`. Artifacts: `inbox.jsonl`, `unread.flag`, `listener-state.json`.
 
-1. Poll `GET /messages` every `WHATSAPP_POLL_MS`.
+1. Poll `GET /messages` every `WHATSAPP_POLL_MS`. With multi-account config, poll each `/accounts/<name>/messages` instead (the shipped listener does this). HTTP 408/503, a not-connected body, or health `disconnected` / `connecting` / `reconnecting` is a reconnect window: retry that poll a few times, warn once, and keep looping. Other HTTP errors warn once and are not retried.
 2. Dedupe; append to `inbox.jsonl`; skip non-allowlist.
 3. If `WHATSAPP_WAKE_WEBHOOK_URL` set: `POST` JSON `{source,chatId,senderId,senderName,body,hasMedia,ts}` with `Authorization` header when auth set. Expect **401** without auth.
 4. Optional fixed ack via `/send` when `WHATSAPP_PROGRAMMATIC_ACK` non-empty (usually off when webhook replies).
@@ -96,6 +100,59 @@ chatId may be `@lid` (Linked Identity); `/send` accepts it — do not force `@s.
 - DM classic: `<digits>@s.whatsapp.net`
 - DM LID: `<id>@lid` (common on inbound)
 - Group: `…@g.us` only if explicitly asked
+
+## Multi-account
+
+`WHATSAPP_ALLOWED_USERS` is still the inbound allowlist. It does not create accounts.
+
+No `WHATSAPP_ACCOUNTS` and no `accounts/*.env` means one session, one socket, legacy `/health` JSON, and the commands above. Do not move an already-paired `session/` when you upgrade.
+
+Several named numbers share **one process and one port** (one Baileys socket each). Config is either:
+
+- `WHATSAPP_ACCOUNTS` — JSON, or a path such as `./accounts.json` (that filename is gitignored). Copy `accounts.example.json`.
+- `accounts/<name>.env` — copy `accounts/sales.env.example`. `*.env.example` is not loaded. If both styles exist, the JSON wins.
+
+Give the existing `./session` directory to the default account (`default` in the JSON, or `WHATSAPP_DEFAULT_ACCOUNT`, or the first account). Other accounts get new empty directories such as `./sessions/sales`. Never copy creds between them. Never commit session dirs, `accounts.json`, or `accounts/*.env`.
+
+```bash
+./pair.sh sales
+./start.sh
+curl -sS http://127.0.0.1:3100/health
+# status/session describe the default account; accounts[] lists each status
+curl -sS -X POST http://127.0.0.1:3100/accounts/sales/send \
+  -H 'content-type: application/json' \
+  -d '{"chatId":"<jid from inbox>","message":"hi"}'
+```
+
+Account selection, and they must not disagree:
+
+| How | Example |
+| --- | --- |
+| Path | `/accounts/sales/send` |
+| Header | `X-WhatsApp-Account: sales` |
+| Query | `/send?account=sales` |
+| None | Default account. This is what old `/send` and `/messages` clients hit. |
+
+`/health?account=sales` is that account only. `allConnected` is false when any account is not `connected`. A watchdog that only checks top-level `status` is watching the default account.
+
+The listener polls **each** account. Inbox lines and webhook bodies include `account`. Ack and wake can be overridden per account (`WHATSAPP_PROGRAMMATIC_ACK`, `WHATSAPP_WAKE_WEBHOOK_URL`, `WHATSAPP_WAKE_WEBHOOK_AUTH` in that account's env file or JSON). A custom poller that only calls `GET /messages` still sees only the default account.
+
+Per-account allowlist: `allowedUsers` / `WHATSAPP_ALLOWED_USERS` on that account. If the key is omitted, the process allowlist is used.
+
+```bash
+./logout.sh sales          # unlink sales; other accounts stay up
+./pair.sh sales            # pauses sales on a live bridge, QR, resumes after success
+```
+
+Re-pair without logout (bridge already running):
+
+```bash
+curl -sS -X POST http://127.0.0.1:3100/accounts/sales/pause
+./pair.sh sales
+curl -sS -X POST http://127.0.0.1:3100/accounts/sales/resume
+```
+
+Single-session `./logout.sh` still ends the bridge process after unlink. Multi-account `loggedOut` does not. Do not `rm -rf session` when only one named account needs a new QR.
 
 ## Logout / re-pair
 
