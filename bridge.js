@@ -33,7 +33,7 @@ import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
-import { createVersionResolver, installConsoleStamps, readReconnectTiming, writeJsonLine } from './bridge_helpers.js';
+import { createVersionResolver, installConsoleStamps, readReconnectTiming, resolveListenHost, writeJsonLine } from './bridge_helpers.js';
 import { accountForPairing, loadAccountConfigs, resolveRuntimeConfig } from './accounts_config.js';
 import { createBridgeApp } from './account_http.js';
 import { createAccountRuntime } from './account_runtime.js';
@@ -150,6 +150,7 @@ export async function main(argvEnv = process.env) {
     return;
   }
 
+  const host = resolveListenHost(argvEnv);
   const runtimes = config.accounts.map((account) => runtimeFor(account, shared));
   const app = createBridgeApp({
     accounts: runtimes,
@@ -157,8 +158,11 @@ export async function main(argvEnv = process.env) {
     multi: config.multi,
     scriptHash: scriptHash(),
   });
+  if (host !== '127.0.0.1') {
+    console.log(`HTTP bind ${host}:${port}. Publish this port on 127.0.0.1 only.`);
+  }
   await new Promise((resolve, reject) => {
-    const server = app.listen(port, '127.0.0.1', () => resolve(server));
+    const server = app.listen(port, host, () => resolve(server));
     server.on('error', reject);
   });
   for (const line of formatAccountStartupLines({
