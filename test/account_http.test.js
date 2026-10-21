@@ -296,6 +296,10 @@ test('invalid Host header is rejected', async () => {
 test('Compose service name is opt-in and other hosts stay rejected', async () => {
   assert.deepEqual(parseTrustedHosts(' bridge ,'), ['bridge']);
   assert.deepEqual(parseTrustedHosts(''), []);
+  assert.deepEqual(
+    parseTrustedHosts('bridge,leohofamily.tail48056.ts.net'),
+    ['bridge', 'leohofamily.tail48056.ts.net'],
+  );
   assert.throws(() => parseTrustedHosts('http://bridge'), /WHATSAPP_TRUSTED_HOSTS/);
 
   const plain = createBridgeApp({

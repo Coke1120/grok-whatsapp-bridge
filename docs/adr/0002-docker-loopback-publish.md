@@ -21,4 +21,10 @@ Accepted. 2026-10-21.
 
 - Host networking plus `WHATSAPP_BIND_HOST=0.0.0.0` listens on every interface of the NAS. Host networking has to set `WHATSAPP_BIND_HOST=127.0.0.1` and drop the `ports:` mapping.
 - `docker compose down -v`, or deleting `wa-session` / `wa-sessions` in Container Manager, logs the WhatsApp account out on the next start.
-- A proxy that forwards a public `Host` header receives HTTP 400. Point it at `127.0.0.1` and leave the upstream Host as that loopback name.
+- A proxy that forwards a public `Host` header receives HTTP 400. Point it at `127.0.0.1` and leave the upstream Host as that loopback name, or add that proxy's hostname to `WHATSAPP_TRUSTED_HOSTS` when it is a tailnet name (see the amendment).
+
+## Amendment (2026-10-21)
+
+`WHATSAPP_TRUSTED_HOSTS` still defaults to the Compose service name `bridge`. It is no longer hardcoded over the project env, so `.env` or the Portainer stack environment can extend it. Tailscale Serve via MagicDNS sends that MagicDNS name as `Host` and gets HTTP 400 until the list includes it (example: `bridge,leohofamily.tail48056.ts.net`). A public hostname is still not added. Funnel stays out.
+
+When Container Manager's bridge network cannot resolve or reach WhatsApp (`EAI_AGAIN` inside the container, no QR, close 408) while the NAS host can, use the optional `docker-compose.host-net.yml` overlay: `network_mode: host`, no published ports, `WHATSAPP_BIND_HOST=127.0.0.1`. That overlay is not the default. Host networking with `0.0.0.0` is still rejected by this ADR. Image build and publish are [ADR 0003](0003-ghcr-pull-not-nas-build.md).

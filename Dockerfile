@@ -18,6 +18,11 @@ ENV NODE_ENV=production \
     WHATSAPP_SESSION_DIR=/app/session \
     WHATSAPP_BIND_HOST=0.0.0.0
 
+LABEL org.opencontainers.image.source="https://github.com/Coke1120/grok-whatsapp-bridge" \
+      org.opencontainers.image.title="grok-whatsapp-bridge" \
+      org.opencontainers.image.description="Grok WhatsApp Bridge. Loopback HTTP API; do not publish it." \
+      org.opencontainers.image.licenses="MIT"
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
 COPY account_http.js account_runtime.js accounts_config.js allowlist.js \

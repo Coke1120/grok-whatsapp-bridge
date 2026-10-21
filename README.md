@@ -15,7 +15,7 @@ Marketplace plugin that ships the **whatsapp-bridge** agent skill plus the runna
 
 ## Runtime: WhatsApp Baileys HTTP bridge
 
-Based on [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) `scripts/whatsapp-bridge` (MIT); this repo adds a **zero-LLM** allowlist listener, optional **webhook wake**, and skill packaging.
+Grok WhatsApp Bridge adds a **zero-LLM** allowlist listener, optional **webhook wake**, and skill packaging. The Baileys bridge code started from [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) `scripts/whatsapp-bridge` (MIT).
 
 > Unofficial WhatsApp Web API (Baileys). Prefer a dedicated spare number. Do not bulk-spam. Bind to loopback and reach it only via Tailscale / SSH tunnel / authenticated reverse proxy — never expose the bridge port to the public internet.
 
@@ -47,21 +47,33 @@ curl -s http://127.0.0.1:37100/health
 ./start-listener.sh    # optional: allowlist poll + inbox.jsonl + webhook
 ```
 
-## Docker (Synology and other hosts)
+## Docker (GHCR, Synology, Portainer)
 
-`./start.sh`, `./pair.sh`, and `./start-listener.sh` stay the bare-metal path. `Dockerfile` and `docker-compose.yml` are an extra way to run the same processes.
+`./start.sh`, `./pair.sh`, and `./start-listener.sh` stay the bare-metal path. `Dockerfile` is what GitHub Actions builds. `docker-compose.yml` only **pulls**.
 
-**Never publish the bridge to the open internet.** Compose maps `127.0.0.1:37100` on the host only. Do not change that to `37100:37100`, do not forward the port, and do not use Tailscale Funnel. The HTTP API has no login.
+Image: `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.1` (and `:latest` on each publish). The repo is public, so `docker pull` does not need a login unless the package is later made private. Pin a tag. Do not attach image tarballs to GitHub Releases.
+
+**Never publish the bridge to the open internet.** Compose maps `127.0.0.1:37100` on the host only. Do not change that to `37100:37100`, do not forward the port, and do not use Tailscale Funnel. The HTTP API has no login. `curl` HTTP 200 on `/health` means the process is up, not that WhatsApp is linked. `curl` HTTPS 200 on `https://web.whatsapp.com` is not a working WebSocket (WSS).
+
+**Do not `docker compose build` or `up --build` on Synology or in Portainer.** On-NAS `npm ci` hangs (the NAS is x86_64; this is not an arm gap). There is no reliable Buildx on the NAS. Dev hosts that want a local image use `docker-compose.build.yml`.
 
 ```bash
 cp .env.example .env
-docker compose up -d --build
+chmod 600 .env
+docker compose pull
+docker compose up -d
 docker compose logs -f bridge    # first QR; session stays on the wa-session volume
 curl -sS http://127.0.0.1:37100/health
 docker compose --profile listener up -d
 ```
 
-Full steps (Container Manager, Tailscale / SSH, one-shot pair, upgrade without wiping `session/`, multi-account volumes): [docs/docker-synology.md](docs/docker-synology.md).
+Portainer: set variables in the stack environment UI. Do not use a relative `env_file: .env`. `WHATSAPP_TRUSTED_HOSTS` defaults to `bridge` and can be extended from that UI or from `.env` (Tailscale Serve MagicDNS). Example: `bridge,leohofamily.tail48056.ts.net`.
+
+If Compose bridge DNS/egress dies (`EAI_AGAIN` for `web.whatsapp.com` inside the container, no QR, close 408) while the NAS host can resolve WhatsApp, use `docker-compose.host-net.yml`: host network and `WHATSAPP_BIND_HOST=127.0.0.1`. That file is not the default. Do not bind `0.0.0.0` on the host network.
+
+WhatsApp → Linked devices may still show **Google Chrome (Hermes Agent)** until an image that contains the rename is running, and usually until the next link. Do not re-pair a working session only to change that label. Image `:v1.3.1` built from git tag `v1.3.1` is older than the rename.
+
+Full steps (Container Manager, pull vs build, Tailscale / SSH, host network, one-shot pair, upgrade without wiping `session/`): [docs/docker-synology.md](docs/docker-synology.md).
 
 ## Token model
 

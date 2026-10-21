@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import path from 'path';
 
-export const DEFAULT_REPLY_PREFIX = '☤ *Hermes Agent*\n────────────\n';
+export const DEFAULT_REPLY_PREFIX = '☤ *Grok WhatsApp Bridge*\n────────────\n';
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 

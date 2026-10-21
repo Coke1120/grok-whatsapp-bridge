@@ -42,6 +42,11 @@ test('no multi config keeps a single implicit account', () => {
   assert.equal(cfg.accounts[0].wakeWebhookUrl, null);
 });
 
+test('default reply prefix names Grok WhatsApp Bridge', () => {
+  assert.equal(DEFAULT_REPLY_PREFIX, '☤ *Grok WhatsApp Bridge*\n────────────\n');
+  assert.equal(DEFAULT_REPLY_PREFIX.includes('Hermes'), false);
+});
+
 test('falls back to the historical Hermes session path when no session is configured', () => {
   const cfg = loadAccountConfigs({
     env: { HOME: '/home/example' },

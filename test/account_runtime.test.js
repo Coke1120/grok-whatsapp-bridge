@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,12 @@ import { DisconnectReason } from '@whiskeysockets/baileys';
 import { DEFAULT_REPLY_PREFIX } from '../accounts_config.js';
 import { createAccountRuntime } from '../account_runtime.js';
 import { PRE_QR_EGRESS_HINT } from '../bridge_helpers.js';
+
+test('linked device browser name is Grok WhatsApp Bridge', () => {
+  const src = readFileSync(new URL('../account_runtime.js', import.meta.url), 'utf8');
+  assert.match(src, /browser: \['Grok WhatsApp Bridge', 'Chrome', '120\.0'\]/);
+  assert.equal(src.includes('Hermes'), false);
+});
 
 function createClock() {
   let seq = 1;

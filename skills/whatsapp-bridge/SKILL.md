@@ -7,7 +7,7 @@ description: >-
 ---
 # WhatsApp Baileys bridge + programmatic listener + webhook wake
 
-Standalone Baileys bridge (from Hermes Agent `scripts/whatsapp-bridge`). HTTP API on an always-on host; the agent reaches it via localhost / Tailscale — never the public internet.
+Grok WhatsApp Bridge: a Baileys HTTP API on an always-on host. The agent reaches it via localhost or Tailscale — never the public internet. Upstream MIT code lives in NousResearch/hermes-agent `scripts/whatsapp-bridge`.
 
 Default install path on this bot: `/workspace/whatsapp-bridge` (adjust if you cloned elsewhere).
 
@@ -29,7 +29,7 @@ Do **not** use a cron poll routine to watch WhatsApp — that burns tokens even 
 2. **Allowlist** `WHATSAPP_ALLOWED_USERS` (E.164 digits, no `+`). Bridge + listener both gate. Empty allowlist = nobody inbound.
 3. **Session is secret** (`session/`). Never commit, paste, or put in Notion/cloud memory. Export packages must omit `session/` and real `.env` secrets.
 4. Prefer `WHATSAPP_MODE=bot` (dedicated/bot number). `self-chat` only for Message-yourself inbound.
-5. Do not change Hermes gateway config. Unofficial API — no bulk spam.
+5. Do not change the agent gateway config. Unofficial API — no bulk spam.
 
 ## One-time setup (host)
 
@@ -47,15 +47,15 @@ nohup ./start-listener.sh > /tmp/wa-listener.log 2>&1 &
 
 `start-listener.sh` must **not** `source .env` with bare bash if values contain spaces — parse quoted `.env` (python + `shlex.quote`) then `exec node listener.mjs`.
 
-Docker (Synology Container Manager or any other host) is additive: `Dockerfile` + `docker-compose.yml`, documented in `docs/docker-synology.md`. `./start.sh` and `./pair.sh` stay valid. Publish `127.0.0.1:37100` only. Never put the bridge on the public internet. Session state is the `wa-session` / `wa-sessions` volumes; do not delete them on upgrade.
+Docker pulls `ghcr.io/coke1120/grok-whatsapp-bridge:<tag>` (`docker-compose.yml` has no `build:`). Do not `docker compose build` or `up --build` on Synology or in Portainer. `Dockerfile` is built in GitHub Actions; `./start.sh` and `./pair.sh` stay the bare-metal path. Publish `127.0.0.1:37100` only. Never Funnel and never a public bind. If bridge-network DNS/egress dies (`EAI_AGAIN`, no QR), use `docker-compose.host-net.yml` (`network_mode: host`, `WHATSAPP_BIND_HOST=127.0.0.1`) — that overlay is not the default. `WHATSAPP_TRUSTED_HOSTS` defaults to `bridge` and must include a Tailscale MagicDNS name when Serve sends that `Host`. Session state is the `wa-session` / `wa-sessions` volumes; do not delete them on upgrade. Details: `docs/docker-synology.md`.
 
 ## .env keys
 
 | Key | Purpose |
 |-----|---------|
 | `WHATSAPP_BRIDGE_PORT` | default `37100` |
-| `WHATSAPP_BIND_HOST` | unset = `127.0.0.1`. Docker image uses `0.0.0.0` inside the container; the host publish stays loopback |
-| `WHATSAPP_TRUSTED_HOSTS` | unset on bare metal. Compose sets `bridge` so the listener may call `http://bridge:37100`. Do not put a public hostname here |
+| `WHATSAPP_BIND_HOST` | unset = `127.0.0.1`. Default compose forces `0.0.0.0` inside the container and publishes loopback. Host-network overlay forces `127.0.0.1`. Never `0.0.0.0` with host networking |
+| `WHATSAPP_TRUSTED_HOSTS` | unset on bare metal. Compose defaults to `bridge` and does not override a value set in `.env` or Portainer. Add a MagicDNS name for Tailscale Serve. Do not put a public hostname here |
 | `WHATSAPP_MODE` | `bot` \| `self-chat` |
 | `WHATSAPP_ALLOWED_USERS` | comma-separated digits (required for inbound) |
 | `WHATSAPP_PROGRAMMATIC_ACK` | fixed ack text; empty = off |
@@ -184,6 +184,6 @@ Ship source + `package.json` + scripts + skill copy; **omit** `session/`, `node_
 ## Out of scope
 
 - Meta WhatsApp Business Cloud API
-- Hermes gateway edits
+- Agent gateway config edits
 - Public unauthenticated exposure of the Baileys port
 - Cron polling WhatsApp for wakes
