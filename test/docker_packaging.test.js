@@ -38,7 +38,7 @@ assert bridge["restart"] == "unless-stopped"
 assert "env_file" not in bridge
 assert "build" not in bridge
 assert "network_mode" not in bridge
-assert bridge["image"] == "ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.1"
+assert bridge["image"] == "ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2"
 assert listener["image"] == bridge["image"]
 assert pair["image"] == bridge["image"]
 assert "build" not in listener and "build" not in pair
@@ -127,7 +127,7 @@ test('NAS compose pulls GHCR and does not build; host network is opt-in', () => 
   assert.match(doc, /HTTPS 200 is not WSS/);
   assert.match(doc, /do not build|Do not build|never run/i);
   const readme = read('README.md');
-  assert.match(readme, /ghcr\.io\/coke1120\/grok-whatsapp-bridge:v1\.3\.1/);
+  assert.match(readme, /ghcr\.io\/coke1120\/grok-whatsapp-bridge:v1\.3\.2/);
   assert.match(readme, /do not use Tailscale Funnel/i);
 });
 

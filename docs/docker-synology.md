@@ -15,25 +15,19 @@ Image: `ghcr.io/coke1120/grok-whatsapp-bridge`
 | `:vX.Y.Z` | GitHub Release published, or a `vX.Y.Z` tag push, or Actions **Publish GHCR image** with that tag. This is the pin. |
 | `:latest` | Same publish. Do not pin the NAS to `:latest`. |
 
-`docker-compose.yml` pins `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.1` on `bridge`, `listener`, and `pair`. Change all three when you move the pin (the YAML anchor `bridge-image` is one value).
+`docker-compose.yml` pins `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2` on `bridge`, `listener`, and `pair`. Change all three when you move the pin (the YAML anchor `bridge-image` is one value).
 
 ```bash
-docker pull ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.1
+docker pull ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2
 ```
 
 The repository is public. Anonymous pull is the normal path. You do not `docker login` on the NAS. GitHub sometimes creates the first package as private; the publish workflow asks for public visibility. If `docker pull` is denied, an owner sets the package to **Public** once on the package page. Do not put a registry token on the NAS. If the package is later made private, `docker login ghcr.io` needs a classic PAT with `read:packages`.
 
 Platforms are `linux/amd64` and `linux/arm64`. This NAS is **x86_64** and pulls **amd64**. arm64 is for other hosts. The on-NAS build failure was not an architecture miss.
 
-The git tag `v1.3.1` does not contain the publish workflow. After this workflow file is on the default branch `main`, publish that existing tag without a new release:
+Git tag `v1.3.2` contains `.github/workflows/publish-image.yml` and the linked-device rename. Publishing GitHub Release `v1.3.2` (or pushing that tag) builds `linux/amd64` and `linux/arm64` and pushes `:v1.3.2` and `:latest`. Do not attach an image tarball to the Release.
 
-```bash
-gh workflow run publish-image.yml --ref main -f tag=v1.3.1
-```
-
-In the Actions tab: **Publish GHCR image** → **Run workflow** → tag `v1.3.1`. That checks out git tag `v1.3.1` and pushes `:v1.3.1` and `:latest`. `workflow_dispatch` does not appear until the workflow file is on `main`. A later `v*` release or tag push publishes itself when the tagged commit contains `.github/workflows/publish-image.yml`.
-
-`:v1.3.1` is the tree at git tag `v1.3.1`. Later commits (including the linked-device rename below) are not in that image until a newer tag is published.
+Git tag `v1.3.1` does not contain the publish workflow or the rename. Do not `workflow_dispatch` `v1.3.1`. An image built from that tag still has the old linked-device label. `workflow_dispatch` is available only after this workflow file is on `main`, and a tag or release event uses the workflow file inside the tagged commit.
 
 ## Do not build on the NAS
 
@@ -212,7 +206,7 @@ Container Manager and Portainer usually have one YAML editor and may not support
 
 ## Linked device name
 
-WhatsApp → Linked devices shows the Baileys browser name. Sessions linked by an older image can still say **Google Chrome (Hermes Agent)**. An image built from the rename says **Google Chrome (Grok WhatsApp Bridge)**. The label usually changes only after that image is the one running **and** the device is linked again. Do not re-pair a working NAS session only to rename the row. Git tag `v1.3.1` is older than the rename, so image `:v1.3.1` built from that tag still has the old label.
+WhatsApp → Linked devices shows the Baileys browser name. Sessions linked by an older image can still say **Google Chrome (Hermes Agent)**. An image built from the rename says **Google Chrome (Grok WhatsApp Bridge)**. The label usually changes only after that image is the one running **and** the device is linked again. Do not re-pair a working NAS session only to rename the row. Git tag `v1.3.2` contains the rename. Git tag `v1.3.1` does not, so image `:v1.3.1` built from that tag still has the old label.
 
 ## First QR, and a one-shot pair
 
