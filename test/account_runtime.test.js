@@ -7,6 +7,7 @@ import { Boom } from '@hapi/boom';
 import { DisconnectReason } from '@whiskeysockets/baileys';
 import { DEFAULT_REPLY_PREFIX } from '../accounts_config.js';
 import { createAccountRuntime } from '../account_runtime.js';
+import { PRE_QR_EGRESS_HINT } from '../bridge_helpers.js';
 
 function createClock() {
   let seq = 1;
@@ -394,6 +395,87 @@ test('inbound messages are allowlisted per account and tagged only in multi mode
     assert.equal(multiEvents.length, 1);
     assert.equal(multiEvents[0].body, 'right account');
     assert.equal(multiEvents[0].account, 'sales');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('empty-session 408 before QR logs one egress hint and leaves backoff unchanged', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-'));
+  try {
+    const lines = [];
+    const handle = harness(dir, {
+      log: (line) => lines.push(line),
+      deps: { renderQr() {} },
+    });
+    const hints = () => lines.filter((line) => line === PRE_QR_EGRESS_HINT);
+
+    await handle.runtime.start();
+    await handle.clock.flush();
+    assert.equal(handle.sockets.length, 1);
+
+    await handle.sockets[0].emit('connection.update', closeUpdate(515));
+    assert.deepEqual(hints(), []);
+    assert.equal(lines.at(-1), '↻ WhatsApp requested restart (code 515). Reconnecting...');
+    assert.deepEqual(handle.clock.scheduled(), [1000]);
+
+    await handle.clock.flush();
+    await handle.sockets[1].emit('connection.update', closeUpdate(408));
+    assert.deepEqual(handle.clock.scheduled(), [3000]);
+    assert.deepEqual(hints(), [PRE_QR_EGRESS_HINT]);
+    assert.equal(lines.at(-2), '⚠️  Connection closed (reason: 408). Reconnecting in 3s...');
+    assert.equal(lines.at(-1), PRE_QR_EGRESS_HINT);
+
+    await handle.clock.flush();
+    await handle.sockets[2].emit('connection.update', closeUpdate(408));
+    assert.deepEqual(handle.clock.scheduled(), [6000]);
+    assert.deepEqual(hints(), [PRE_QR_EGRESS_HINT]);
+    assert.equal(lines.at(-1), '⚠️  Connection closed (reason: 408). Reconnecting in 6s...');
+
+    await handle.clock.flush();
+    await handle.sockets[3].emit('connection.update', { qr: 'qr-1' });
+    await handle.sockets[3].emit('connection.update', closeUpdate(408));
+    assert.deepEqual(handle.clock.scheduled(), [12000]);
+    assert.deepEqual(hints(), [PRE_QR_EGRESS_HINT]);
+
+    await handle.clock.flush();
+    await handle.sockets[4].emit('connection.update', closeUpdate(428));
+    assert.deepEqual(handle.clock.scheduled(), [24000]);
+    assert.deepEqual(hints(), [PRE_QR_EGRESS_HINT, PRE_QR_EGRESS_HINT]);
+    assert.equal(lines.at(-1), PRE_QR_EGRESS_HINT);
+
+    await handle.clock.flush();
+    await handle.sockets[5].emit('connection.update', { connection: 'open' });
+    await handle.sockets[5].emit('connection.update', closeUpdate(408));
+    assert.deepEqual(handle.clock.scheduled(), [3000]);
+    assert.deepEqual(hints(), [PRE_QR_EGRESS_HINT, PRE_QR_EGRESS_HINT]);
+    assert.equal(lines.at(-1), '⚠️  Connection closed (reason: 408). Reconnecting in 3s...');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a paired session 408 before open does not log the pre-QR hint', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-'));
+  try {
+    const lines = [];
+    const handle = harness(dir, {
+      log: (line) => lines.push(line),
+      deps: {
+        async useMultiFileAuthState() {
+          return {
+            state: { creds: { registered: true, me: { id: '15550001111:1@s.whatsapp.net' } } },
+            saveCreds() {},
+          };
+        },
+      },
+    });
+    await handle.runtime.start();
+    await handle.clock.flush();
+    await handle.sockets[0].emit('connection.update', closeUpdate(408));
+    assert.deepEqual(handle.clock.scheduled(), [3000]);
+    assert.equal(lines.filter((line) => line === PRE_QR_EGRESS_HINT).length, 0);
+    assert.equal(lines.at(-1), '⚠️  Connection closed (reason: 408). Reconnecting in 3s...');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

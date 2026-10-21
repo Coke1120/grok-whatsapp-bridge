@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  PRE_QR_EGRESS_HINT,
   computeReconnectDelayMs,
+  createPreQrCloseHint,
   createReconnectScheduler,
   readReconnectTiming,
   redactWhatsAppId,
@@ -85,6 +87,46 @@ test('cancel drops a scheduled reconnect and ignores an in-flight failure', asyn
   resumed(0);
   await clock.flush();
   assert.equal(starts, 1);
+});
+
+test('pre-QR close hint latches until QR or open and stays quiet for a paired session', () => {
+  assert.equal(
+    PRE_QR_EGRESS_HINT,
+    '⚠️  Pairing may be stuck — WhatsApp WSS likely failing before QR (check container egress).',
+  );
+
+  const hint = createPreQrCloseHint();
+  hint.noteSocketAttempt({ registered: false });
+  assert.equal(hint.consume(408), true);
+  assert.equal(hint.consume(408), false);
+  hint.noteSocketAttempt({ registered: false });
+  assert.equal(hint.consume(428), false);
+
+  hint.noteQr();
+  assert.equal(hint.consume(408), false);
+  hint.noteSocketAttempt({ registered: false });
+  assert.equal(hint.consume(408), true);
+
+  hint.noteOpen();
+  hint.noteSocketAttempt({ registered: false });
+  assert.equal(hint.consume(408), false);
+  assert.equal(hint.consume(428), false);
+
+  hint.resetAfterLogout();
+  hint.noteSocketAttempt({ registered: true, me: { id: '15550001111:1@s.whatsapp.net' } });
+  assert.equal(hint.consume(408), false);
+  hint.noteSocketAttempt({ me: { id: '15550001111:1@s.whatsapp.net' } });
+  assert.equal(hint.consume(408), false);
+
+  hint.noteSocketAttempt({ registered: false });
+  assert.equal(hint.consume(401), false);
+  assert.equal(hint.consume(515), false);
+  assert.equal(hint.consume(500), false);
+  assert.equal(hint.consume(408), true);
+
+  const other = createPreQrCloseHint();
+  other.noteSocketAttempt({ registered: false });
+  assert.equal(other.consume(408), true);
 });
 
 test('reconnect delay doubles from 3s to a 60s cap, with jitter around the center', () => {

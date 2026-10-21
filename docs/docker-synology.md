@@ -51,7 +51,7 @@ DSM 7.2+ with Container Manager. The NAS needs outbound internet for the first i
 6. Path: the folder that already contains `docker-compose.yml`. Use that file. If the wizard shows the YAML, leave the port as `127.0.0.1:...`.
 7. Do not enable a Web Station portal, a QuickConnect port, or a router forward for 37100. Do not turn on high privilege.
 8. Build and start. The first build pulls `node:22-bookworm-slim` and runs `npm ci`.
-9. Open the bridge container log, or from SSH: `sudo docker compose logs -f bridge`. Scan the QR (WhatsApp → Linked devices).
+9. Open the bridge container log, or from SSH: `sudo docker compose logs -f bridge`. Scan the QR (WhatsApp → Linked devices). A log that only repeats `Connection closed (reason: 408)` and never prints a QR means the container WebSocket to WhatsApp is failing. See [No QR, only 408](#no-qr-only-408).
 10. On the NAS, over SSH: `curl -sS http://127.0.0.1:37100/health`. `status` stays `disconnected` or `connecting` until the scan finishes. HTTP 200 from `/health` means the process is up, not that WhatsApp is linked.
 11. Container Manager → **Volume**. Keep `grok-whatsapp-bridge_wa-session` and `grok-whatsapp-bridge_wa-sessions`. Deleting them deletes the WhatsApp login.
 
@@ -99,7 +99,7 @@ Prefer the published `127.0.0.1` mapping. Use host networking only when that map
 
 ## First QR, and a one-shot pair
 
-**First link.** `docker compose up -d`, then `docker compose logs -f bridge`. The running process prints the QR and keeps the session on `wa-session`. You do not need a second container.
+**First link.** `docker compose up -d`, then `docker compose logs -f bridge`. The running process prints the QR and keeps the session on `wa-session`. You do not need a second container. If that log never prints a QR, see [No QR, only 408](#no-qr-only-408).
 
 **One-shot, bridge stopped** (single session, or a full re-pair):
 
@@ -175,4 +175,28 @@ Do not `docker compose down -v`. Do not delete `wa-session`, `wa-sessions`, or `
 
 ## Health
 
-`/health` returns HTTP 200 while the process is up, including `disconnected`, `connecting`, and the QR wait. The Docker healthcheck uses that on purpose, so a scan or a short 408 does not restart the container. WhatsApp linked is `"status":"connected"` in the JSON. The check calls `http://127.0.0.1:$WHATSAPP_BRIDGE_PORT/health` from inside the container.
+`/health` returns HTTP 200 while the process is up, including `disconnected`, `connecting`, and the QR wait. The Docker healthcheck uses that on purpose, so a scan or a short 408 does not restart the container. WhatsApp linked is `"status":"connected"` in the JSON. The check calls `http://127.0.0.1:$WHATSAPP_BRIDGE_PORT/health` from inside the container. A first link that never prints a QR is still a healthy process; see [No QR, only 408](#no-qr-only-408).
+
+## No QR, only 408
+
+An empty `wa-session` can log `Connection closed (reason: 408). Reconnecting…` and never print `Scan this QR`. That line comes from `account_runtime.js`: the entrypoint and `bridge.js` are already running. Baileys prints the QR only when `connection.update` includes `qr`. **408** (`connectionLost` / `timedOut`, including DNS and timeout errors Baileys maps to 408) means the WebSocket closed before WhatsApp sent a pairing QR. **428** (`connectionClosed`) is the same stage when the socket ends before that QR.
+
+`curl https://web.whatsapp.com` returning HTTP 200 only shows that HTTPS to that host works. Pairing uses a WebSocket, and a filter can allow the HTTPS request while the WebSocket dies.
+
+While the log is looping, check the bridge on the NAS:
+
+```bash
+curl -sS http://127.0.0.1:37100/health
+```
+
+HTTP 200 with `"status":"disconnected"` or `"connecting"` means Node is up and WhatsApp is not linked yet. `"connected"` appears after a successful link. The image healthcheck treats that HTTP 200 as healthy, so this loop does not recreate the container.
+
+Check egress from the **container**, including paths the host shell does not use:
+
+- DNS the container actually uses (Synology Safe Access, AdGuard, Pi-hole, or a VPN resolver).
+- A firewall that allows HTTPS and drops the WebSocket or other long-lived connections to WhatsApp.
+- Safe Access, AdGuard, or a VPN whose path the container traffic follows.
+
+Run the same image on a host whose egress already links WhatsApp. That run should print the QR. When it does, leave `wa-session` in place and fix the NAS path. Deleting the volume does not open the WebSocket.
+
+On this failure the bridge adds one line: `Pairing may be stuck — WhatsApp WSS likely failing before QR (check container egress).` Later reconnects keep the usual backoff and do not repeat that line. A later QR clears the latch, so one new pre-QR close can log it again. A 408 after `WhatsApp connected` stays a normal paired reconnect. Details: [reconnect.md](reconnect.md).
