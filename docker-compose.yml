@@ -52,7 +52,7 @@ x-app-env: &app-env
 
 services:
   bridge:
-    image: &bridge-image ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.1
+    image: &bridge-image ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2
     init: true
     restart: unless-stopped
     stop_grace_period: 20s

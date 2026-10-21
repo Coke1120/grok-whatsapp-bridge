@@ -5,13 +5,13 @@
 #   - GitHub Release published (tag must be vX.Y.Z)
 #   - push of a vX.Y.Z tag that has no GitHub Release (a release also pushes
 #     the tag; that duplicate run is skipped)
-#   - workflow_dispatch input `tag` (example v1.3.1) checks out that git tag
+#   - workflow_dispatch input `tag` (example v1.3.2) checks out that git tag
 #
 # workflow_dispatch is offered only after this file exists on the default
 # branch (main). A release or tag push uses the workflow file in that tag.
-# The existing v1.3.1 tag does not contain this file, so publish it with
-# workflow_dispatch once this workflow is on main:
-#   gh workflow run publish-image.yml --ref main -f tag=v1.3.1
+# Tag v1.3.2 contains this file, so publishing Release v1.3.2 runs it.
+# Do not workflow_dispatch the older tag v1.3.1. That commit has neither
+# this workflow nor the linked-device rename.
 
 name: Publish GHCR image
 
@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Git tag to build and push (example v1.3.1). Also pushes :latest."
+        description: "Git tag to build and push (example v1.3.2). Also pushes :latest."
         required: true
         type: string
 
@@ -61,7 +61,7 @@ jobs:
           esac
           tag="${tag//[[:space:]]/}"
           if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Refusing tag '${tag}'. Use vX.Y.Z, for example v1.3.1." >&2
+            echo "Refusing tag '${tag}'. Use vX.Y.Z, for example v1.3.2." >&2
             exit 1
           fi
           skip=false
