@@ -678,21 +678,52 @@ export function pollCreationMessageFromPayload(payload) {
  * leaves the bridge permanently disconnected with nothing left to retry.
  * Every (re)connect must go through the scheduler this returns.
  */
+export function redactWhatsAppId(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const [userPart, domainPart = ''] = raw.split('@', 2);
+  const bare = userPart.split(':', 1)[0];
+  const digits = bare.replace(/\D/g, '');
+  const suffix = digits ? digits.slice(-4) : bare.slice(-4);
+  return `${suffix ? `…${suffix}` : '…'}${domainPart ? `@${domainPart}` : ''}`;
+}
+
 export function createReconnectScheduler(startFn, {
   retryDelayMs = 5000,
   log = console.log,
   setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
 } = {}) {
+  let timer = null;
+  let stopped = false;
+
   function scheduleReconnect(delayMs) {
-    setTimeoutFn(() => {
-      Promise.resolve()
-        .then(startFn)
+    if (stopped) return;
+    if (timer) clearTimeoutFn(timer);
+    timer = setTimeoutFn(() => {
+      timer = null;
+      return Promise.resolve()
+        .then(() => {
+          if (stopped) return undefined;
+          return startFn();
+        })
         .catch((err) => {
+          if (stopped) return undefined;
           log(`⚠️  Reconnect failed (${err?.message || err}). Retrying in ${Math.round(retryDelayMs / 1000)}s...`);
           scheduleReconnect(retryDelayMs);
+          return undefined;
         });
     }, delayMs);
   }
+
+  scheduleReconnect.cancel = () => {
+    stopped = true;
+    if (timer) clearTimeoutFn(timer);
+    timer = null;
+  };
+  scheduleReconnect.enable = () => {
+    stopped = false;
+  };
   return scheduleReconnect;
 }
 

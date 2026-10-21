@@ -8,7 +8,7 @@ You maintain a WhatsApp Baileys HTTP bridge (`bridge.js` + optional `listener.mj
 
 ## Two layers
 
-1. **Built-in reconnect (already in the plugin):** On `connection === 'close'`, if reason is `loggedOut`, do **not** reconnect — stop, notify the owner, wait for them to clear `session/` and re-pair. For other reasons (common **408**), the bridge waits ~**3s** (~**1s** for **515**) and calls `startSocket()` again; failed reconnect retries ~**5s**. Keep `session/` on disk so QR is usually unnecessary.
+1. **Built-in reconnect (already in the plugin):** On `connection === 'close'`, if reason is `loggedOut`, do **not** reconnect. With no multi config, the process exits — notify the owner and wait for them to clear that session and re-pair. With multi config, only that named account stops; do **not** delete other accounts' session directories. For other reasons (common **408**), that socket waits ~**3s** (~**1s** for **515**) and connects again; failed reconnect retries ~**5s**. Keep the session directory on disk so QR is usually unnecessary. Top-level `/health` `status` is the default account; use `accounts[]` when more than one account is configured.
 
 2. **Outer watchdog (you add this):** Built-in only helps while the Node process lives. If `bridge.js` / `listener.mjs` died, or `GET http://127.0.0.1:3100/health` is not `status=connected` for ~2+ minutes, lightly restart `./start.sh` / `./start-listener.sh`. Do **not** delete `session/`.
 

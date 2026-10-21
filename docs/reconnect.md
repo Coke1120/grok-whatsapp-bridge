@@ -43,6 +43,26 @@ Allowed auto-actions:
 
 Never without explicit owner approval: logout, wipe `session/`, change allowlist, change webhook secrets, bulk `/send`.
 
+## Multi-account
+
+Each configured account has its own socket and its own reconnect timer. A 408 on one account does not reconnect the others. See [ADR 0001](./adr/0001-multi-account-single-process.md).
+
+| Event | Single session (no multi config) | Multi config |
+| --- | --- | --- |
+| `loggedOut` | Process **exits**. Re-pair with `./pair.sh`. | That account becomes `logged_out`. Process stays up. `./logout.sh <name>` then `./pair.sh <name>`. |
+| 408 / 515 / other close | Reconnect that socket | Reconnect **that** socket only |
+| `/health` `status` | That session | The **default** account only. Read `accounts[]` or `allConnected` for the rest. |
+
+Do not delete every session directory because one account needs a QR. Pause or log out that account, then pair it.
+
+```bash
+curl -sS -X POST http://127.0.0.1:3100/accounts/sales/pause
+./pair.sh sales
+curl -sS -X POST http://127.0.0.1:3100/accounts/sales/resume
+```
+
+`./pair.sh <name>` pauses and, after a successful scan, resumes that account when the bridge is already up.
+
 ## Bot prompt example
 
 See [bot-prompt-reconnect.example.md](./bot-prompt-reconnect.example.md) for a pasteable instruction block you can give another agent.

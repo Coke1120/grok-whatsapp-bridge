@@ -23,11 +23,13 @@ Based on [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agen
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/health` | connected? |
-| GET | `/messages` | long-poll inbound |
-| POST | `/send` | `{ "chatId", "message" }` |
+| GET | `/health` | connected? With multi config, also lists every account |
+| GET | `/messages` | long-poll inbound for the default account |
+| POST | `/send` | `{ "chatId", "message" }` on the default account |
 | POST | `/send-media` | media |
-| … | `/edit`, `/typing`, `/read`, … | see `bridge.js` |
+| … | `/edit`, `/typing`, `/read`, `/logout`, `/pause`, `/resume` | see `bridge.js` |
+
+The same paths exist under `/accounts/<name>/...`. A header `X-WhatsApp-Account: <name>` or `?account=<name>` selects an account too. If two selectors disagree, the bridge returns 400.
 
 Default bind: `127.0.0.1:3100`.
 
@@ -57,11 +59,37 @@ Do **not** cron-poll the agent just to watch WhatsApp.
 
 ## Reconnect vs outer watchdog
 
-Socket drops (often reason **408**) are handled **inside** `bridge.js`: wait a few seconds and `startSocket()` again. `loggedOut` exits and needs a manual re-pair.
+Socket drops (often reason **408**) are handled **inside** `bridge.js`: that socket waits a few seconds and connects again. With no multi config, `loggedOut` exits the process and needs a manual re-pair. With multi config, only that account stops.
 
 An optional **outer** watchdog only restarts the process if Node died or `/health` stays not `connected` for minutes — it must never delete `session/`.
 
 Details: [docs/reconnect.md](docs/reconnect.md). Pasteable agent instructions: [docs/bot-prompt-reconnect.example.md](docs/bot-prompt-reconnect.example.md).
+
+## Multi-account
+
+One process, one loopback port, one Baileys socket per account. With no `WHATSAPP_ACCOUNTS` and no `accounts/*.env`, nothing here applies: `./session` and the routes above stay as they are. Design notes: [docs/adr/0001-multi-account-single-process.md](docs/adr/0001-multi-account-single-process.md).
+
+Keep the already-paired directory as the default account. Do not copy credential files into a second folder.
+
+```bash
+cp accounts.example.json accounts.json   # gitignored; or accounts/<name>.env from the example
+# point "primary" sessionDir at the existing ./session
+./pair.sh sales                          # QR for that account only
+./start.sh
+curl -sS http://127.0.0.1:3100/health
+curl -sS -X POST http://127.0.0.1:3100/accounts/sales/send \
+  -H 'content-type: application/json' \
+  -d '{"chatId":"<jid>","message":"hi"}'
+```
+
+`/health` without a selector still reports `status` and `session` for the **default** account (so an old watchdog keeps working) and adds `accounts[]` plus `allConnected`. `GET /messages` without a selector drains only that default account. `./start-listener.sh` polls every account and adds `account` to `inbox.jsonl` and the webhook JSON.
+
+```bash
+./logout.sh sales    # unlink one account; the process stays up
+./pair.sh sales      # pauses that socket if the bridge is up, then resumes after a successful scan
+```
+
+Per-account `allowedUsers` overrides `WHATSAPP_ALLOWED_USERS` for that number. The allowlist is still not the list of accounts.
 
 ## Environment
 
@@ -77,7 +105,7 @@ See `.env.example`. Important:
 
 ## Agent skill
 
-Copy [`skill/SKILL.md`](skill/SKILL.md) into your agent skill library (e.g. Grok Bot workflows) for pairing, send rules, webhook wake, and logout/re-pair.
+[`skills/whatsapp-bridge/SKILL.md`](skills/whatsapp-bridge/SKILL.md) covers pairing, send rules, webhook wake, logout/re-pair, and multi-account.
 
 ## Safety / what this repo never ships
 
