@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Hermes Agent WhatsApp Bridge
+ * Grok WhatsApp Bridge
  *
  * One Node process, one HTTP server, one Baileys socket per configured
  * account. With no WHATSAPP_ACCOUNTS and no accounts/*.env, this is the

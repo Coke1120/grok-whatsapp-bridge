@@ -1,0 +1,168 @@
+# Build linux/amd64 + linux/arm64 and push to GHCR.
+# Tags: :<version> and :latest. No release-asset tarballs.
+#
+# Triggers:
+#   - GitHub Release published (tag must be vX.Y.Z)
+#   - push of a vX.Y.Z tag that has no GitHub Release (a release also pushes
+#     the tag; that duplicate run is skipped)
+#   - workflow_dispatch input `tag` (example v1.3.1) checks out that git tag
+#
+# workflow_dispatch is offered only after this file exists on the default
+# branch (main). A release or tag push uses the workflow file in that tag.
+# The existing v1.3.1 tag does not contain this file, so publish it with
+# workflow_dispatch once this workflow is on main:
+#   gh workflow run publish-image.yml --ref main -f tag=v1.3.1
+
+name: Publish GHCR image
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to build and push (example v1.3.1). Also pushes :latest."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ghcr-grok-whatsapp-bridge-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/coke1120/grok-whatsapp-bridge
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      skip: ${{ steps.meta.outputs.skip }}
+    steps:
+      - name: Resolve tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch) tag="$INPUT_TAG" ;;
+            release) tag="$RELEASE_TAG" ;;
+            *) tag="$GITHUB_REF_NAME" ;;
+          esac
+          tag="${tag//[[:space:]]/}"
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Refusing tag '${tag}'. Use vX.Y.Z, for example v1.3.1." >&2
+            exit 1
+          fi
+          skip=false
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            # Creating a release also pushes the tag. Wait so this run can
+            # see the release and leave the build to the release event.
+            sleep 20
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release ${tag} exists. The release workflow publishes the image."
+              skip=true
+            fi
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "skip=${skip}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: resolve
+    if: needs.resolve.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # Plain image index. Provenance attestations break docker pull on
+          # Synology Container Manager (Docker 20.10).
+          provenance: false
+          sbom: false
+          tags: |
+            ${{ env.IMAGE }}:${{ needs.resolve.outputs.tag }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.title=grok-whatsapp-bridge
+            org.opencontainers.image.description=Grok WhatsApp Bridge. Loopback HTTP API; do not publish it.
+            org.opencontainers.image.version=${{ needs.resolve.outputs.tag }}
+          annotations: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Grok WhatsApp Bridge. Loopback HTTP API; do not publish it.
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Request public package visibility
+        if: github.event.repository.private == false
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          name="grok-whatsapp-bridge"
+          owner="${GITHUB_REPOSITORY_OWNER}"
+          ok=0
+          for _ in 1 2 3 4 5; do
+            if gh api --method PATCH -H "Accept: application/vnd.github+json" \
+                "/users/${owner}/packages/container/${name}" -f visibility=public; then
+              ok=1
+              break
+            fi
+            if gh api --method PATCH -H "Accept: application/vnd.github+json" \
+                "/orgs/${owner}/packages/container/${name}" -f visibility=public; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ok" != 1 ]; then
+            echo "Could not set the package to public. If docker pull is denied, an owner sets visibility to Public once on the package page. Do not put a registry token on the NAS."
+            exit 1
+          fi
+
+      - name: Summary
+        run: |
+          {
+            echo "### GHCR image"
+            echo ""
+            echo "- \`${IMAGE}:${{ needs.resolve.outputs.tag }}\`"
+            echo "- \`${IMAGE}:latest\`"
+            echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            echo "- No release tarball attached"
+          } >> "$GITHUB_STEP_SUMMARY"

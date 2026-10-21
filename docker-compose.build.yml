@@ -1,0 +1,16 @@
+# Dev hosts only. Synology and Portainer must not use this file and must not
+# pass --build. On-NAS npm ci hangs (x86_64 resource limits, not an arm miss).
+# GitHub Actions builds linux/amd64 and linux/arm64 and pushes GHCR.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+
+services:
+  bridge:
+    image: grok-whatsapp-bridge:dev
+    build: .
+  listener:
+    image: grok-whatsapp-bridge:dev
+    build: .
+  pair:
+    image: grok-whatsapp-bridge:dev
+    build: .
