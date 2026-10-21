@@ -1,0 +1,40 @@
+# Optional overlay. Not the default, and not applied unless you name this file.
+# Use it when Container Manager's bridge network cannot resolve or reach
+# WhatsApp: the container logs EAI_AGAIN for web.whatsapp.com (or close 408
+# and no QR) while DNS on the NAS host itself works.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.host-net.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.host-net.yml up -d
+#
+# Do not pass --build. The image stays the GHCR pin from docker-compose.yml.
+# Requires Compose 2.24+ for ports: !reset. In Container Manager's single YAML
+# editor, delete the ports block instead of using !reset. See
+# docs/docker-synology.md.
+#
+# Bind stays 127.0.0.1. Do not set WHATSAPP_BIND_HOST=0.0.0.0 with host
+# networking (that listens on every NAS interface). Do not publish
+# 0.0.0.0:37100. Do not use Tailscale Funnel.
+#
+# Tailscale Serve via MagicDNS can send Host: <name>.ts.net and get HTTP 400
+# until WHATSAPP_TRUSTED_HOSTS includes that name. Set it in the project .env
+# or the Portainer stack environment (the base file reads it). Example:
+#   WHATSAPP_TRUSTED_HOSTS=bridge,leohofamily.tail48056.ts.net
+# Do not put a public hostname there.
+
+services:
+  bridge:
+    network_mode: host
+    ports: !reset []
+    environment:
+      WHATSAPP_BIND_HOST: "127.0.0.1"
+  listener:
+    network_mode: host
+    environment:
+      # No Compose DNS name on the host network. 127.0.0.1 is the NAS loopback.
+      WHATSAPP_BRIDGE_URL: http://127.0.0.1:${WHATSAPP_BRIDGE_PORT:-37100}
+  # pair keeps network_mode: service:bridge from docker-compose.yml, so it
+  # joins the bridge container's network namespace (the host) and can pause
+  # 127.0.0.1. Do not also set host mode on pair.
+  pair:
+    environment:
+      WHATSAPP_BIND_HOST: "127.0.0.1"

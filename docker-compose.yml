@@ -1,27 +1,65 @@
-# WhatsApp bridge. The HTTP API is not authenticated.
-# Publish on the host loopback only. Never map this port to 0.0.0.0,
-# a LAN address, a router forward, or Tailscale Funnel.
-# See docs/docker-synology.md.
+# Grok WhatsApp Bridge. The HTTP API is not authenticated.
+# Pull ghcr.io/coke1120/grok-whatsapp-bridge:<tag>. Do not build this file on a NAS.
+# Synology Container Manager and Portainer must not pass --build. On-box npm ci
+# hangs there. Dev hosts that need a local image use docker-compose.build.yml.
+#
+# Publish on the host loopback only. Never map this port to 0.0.0.0, a LAN
+# address, a router forward, or Tailscale Funnel.
+# When Compose bridge DNS/egress is dead, use docker-compose.host-net.yml.
+# That overlay is not the default. See docs/docker-synology.md.
 
 name: grok-whatsapp-bridge
 
+x-app-env: &app-env
+  # Project `.env` (Compose interpolation) or the Portainer stack environment.
+  # There is no relative env_file: Portainer resolves that from an internal
+  # directory and drops or ignores secrets. Do not commit real values.
+  # Docker-only values below stay fixed so a bare-metal .env cannot point the
+  # container at a host path or at 127.0.0.1 inside bridge networking.
+  WHATSAPP_BRIDGE_PORT: ${WHATSAPP_BRIDGE_PORT:-37100}
+  WHATSAPP_BIND_HOST: "0.0.0.0"
+  # Default `bridge` is the Compose DNS name. Set WHATSAPP_TRUSTED_HOSTS in
+  # `.env` or Portainer to extend it (Tailscale Serve MagicDNS). A public name
+  # does not belong here. Example:
+  # WHATSAPP_TRUSTED_HOSTS=bridge,leohofamily.tail48056.ts.net
+  WHATSAPP_TRUSTED_HOSTS: ${WHATSAPP_TRUSTED_HOSTS:-bridge}
+  WHATSAPP_SESSION_DIR: /app/session
+  HOME: /home/node
+  WHATSAPP_ALLOWED_USERS: ${WHATSAPP_ALLOWED_USERS:-}
+  WHATSAPP_GROUP_ALLOWED_USERS: ${WHATSAPP_GROUP_ALLOWED_USERS:-}
+  WHATSAPP_MODE: ${WHATSAPP_MODE:-bot}
+  WHATSAPP_DM_POLICY: ${WHATSAPP_DM_POLICY:-}
+  WHATSAPP_GROUP_POLICY: ${WHATSAPP_GROUP_POLICY:-}
+  # Unset keeps the built-in Grok WhatsApp Bridge prefix. An empty value in
+  # `.env` (the example file) turns the prefix off, same as bare metal.
+  WHATSAPP_REPLY_PREFIX: "${WHATSAPP_REPLY_PREFIX-☤ *Grok WhatsApp Bridge*\\n────────────\\n}"
+  WHATSAPP_FORWARD_OWNER_MESSAGES: ${WHATSAPP_FORWARD_OWNER_MESSAGES:-}
+  WHATSAPP_SEND_READ_RECEIPTS: ${WHATSAPP_SEND_READ_RECEIPTS:-}
+  WHATSAPP_PROGRAMMATIC_ACK: ${WHATSAPP_PROGRAMMATIC_ACK:-}
+  WHATSAPP_WAKE_WEBHOOK_URL: ${WHATSAPP_WAKE_WEBHOOK_URL:-}
+  WHATSAPP_WAKE_WEBHOOK_AUTH: ${WHATSAPP_WAKE_WEBHOOK_AUTH:-}
+  WHATSAPP_WAKE_AUTHORIZATION: ${WHATSAPP_WAKE_AUTHORIZATION:-}
+  WHATSAPP_POLL_MS: ${WHATSAPP_POLL_MS:-}
+  WHATSAPP_RECONNECT_BASE_MS: ${WHATSAPP_RECONNECT_BASE_MS:-}
+  WHATSAPP_RECONNECT_CAP_MS: ${WHATSAPP_RECONNECT_CAP_MS:-}
+  WHATSAPP_MAX_MESSAGE_LENGTH: ${WHATSAPP_MAX_MESSAGE_LENGTH:-}
+  WHATSAPP_CHUNK_DELAY_MS: ${WHATSAPP_CHUNK_DELAY_MS:-}
+  WHATSAPP_SEND_TIMEOUT_MS: ${WHATSAPP_SEND_TIMEOUT_MS:-}
+  WHATSAPP_DEBUG: ${WHATSAPP_DEBUG:-}
+  WHATSAPP_ACCOUNTS: ${WHATSAPP_ACCOUNTS:-}
+  WHATSAPP_ACCOUNTS_DIR: ${WHATSAPP_ACCOUNTS_DIR:-/app/accounts}
+  WHATSAPP_DEFAULT_ACCOUNT: ${WHATSAPP_DEFAULT_ACCOUNT:-}
+
 services:
   bridge:
-    image: grok-whatsapp-bridge:local
-    build: .
-    env_file: .env
+    image: &bridge-image ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.1
     init: true
     restart: unless-stopped
     stop_grace_period: 20s
     security_opt:
       - no-new-privileges:true
     environment:
-      # Wildcard inside the container so the published loopback port can connect.
-      # Host-header checks still allow loopback names, plus the Compose DNS name below.
-      WHATSAPP_BIND_HOST: "0.0.0.0"
-      WHATSAPP_TRUSTED_HOSTS: bridge
-      WHATSAPP_SESSION_DIR: /app/session
-      HOME: /home/node
+      <<: *app-env
     ports:
       # Host loopback only. Do not change this to "37100:37100" or "0.0.0.0:37100:37100".
       - "127.0.0.1:${WHATSAPP_BRIDGE_PORT:-37100}:${WHATSAPP_BRIDGE_PORT:-37100}"
@@ -48,9 +86,7 @@ services:
 
   listener:
     profiles: ["listener"]
-    image: grok-whatsapp-bridge:local
-    build: .
-    env_file: .env
+    image: *bridge-image
     init: true
     restart: unless-stopped
     security_opt:
@@ -60,7 +96,7 @@ services:
         condition: service_healthy
     command: ["listener"]
     environment:
-      HOME: /home/node
+      <<: *app-env
       # Compose DNS name. Survives a bridge recreate; 127.0.0.1 would be this container.
       WHATSAPP_BRIDGE_URL: http://bridge:${WHATSAPP_BRIDGE_PORT:-37100}
       WHATSAPP_INBOX_PATH: /app/listener-data/inbox.jsonl
@@ -82,9 +118,7 @@ services:
   # docker compose run --rm -e WHATSAPP_PAIR_CONFIRM=1 pair <account>
   pair:
     profiles: ["pair"]
-    image: grok-whatsapp-bridge:local
-    build: .
-    env_file: .env
+    image: *bridge-image
     init: true
     restart: "no"
     security_opt:
@@ -97,9 +131,8 @@ services:
     tty: true
     command: ["pair"]
     environment:
+      <<: *app-env
       WHATSAPP_DOCKER_ROLE: pair
-      WHATSAPP_SESSION_DIR: /app/session
-      HOME: /home/node
     volumes:
       - wa-session:/app/session
       - wa-sessions:/app/sessions

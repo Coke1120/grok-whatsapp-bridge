@@ -686,7 +686,7 @@ export function createAccountRuntime(options) {
       auth: state,
       logger,
       printQRInTerminal: false,
-      browser: ['Hermes Agent', 'Chrome', '120.0'],
+      browser: ['Grok WhatsApp Bridge', 'Chrome', '120.0'],
       syncFullHistory: false,
       markOnlineOnConnect: false,
       getMessage: async () => ({ conversation: '' }),
@@ -859,7 +859,7 @@ export function createAccountRuntime(options) {
           if (ext === 'gif') {
             let tmpGifMp4 = null;
             try {
-              tmpGifMp4 = path.join(tmpdir(), `hermes_gif_${randomBytes(6).toString('hex')}.mp4`);
+              tmpGifMp4 = path.join(tmpdir(), `wa_gif_${randomBytes(6).toString('hex')}.mp4`);
               execFileSync(
                 'ffmpeg',
                 ['-y', '-i', filePath, '-movflags', 'faststart', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', tmpGifMp4],
@@ -890,7 +890,7 @@ export function createAccountRuntime(options) {
           const needsConversion = !['ogg', 'opus'].includes(ext);
           let tmpPath = null;
           if (needsConversion) {
-            tmpPath = path.join(tmpdir(), `hermes_voice_${randomBytes(6).toString('hex')}.ogg`);
+            tmpPath = path.join(tmpdir(), `wa_voice_${randomBytes(6).toString('hex')}.ogg`);
             try {
               execFileSync(
                 'ffmpeg',
