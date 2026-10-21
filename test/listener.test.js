@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { classifyBridgeResponse, createInboxListener } from '../listener.mjs';
+import { classifyBridgeResponse, createInboxListener, listenerArtifactPaths } from '../listener.mjs';
 
 function jsonResponse(body, status = 200) {
   return {
@@ -13,6 +13,27 @@ function jsonResponse(body, status = 200) {
     async text() { return JSON.stringify(body); },
   };
 }
+
+test('listener files stay beside the script unless Docker overrides them', () => {
+  assert.deepEqual(listenerArtifactPaths({}, '/app'), {
+    inboxPath: '/app/inbox.jsonl',
+    statePath: '/app/listener-state.json',
+    unreadFlagPath: '/app/unread.flag',
+  });
+  assert.equal(
+    listenerArtifactPaths({ WHATSAPP_INBOX_PATH: '  ' }, '/app').inboxPath,
+    '/app/inbox.jsonl',
+  );
+  assert.deepEqual(listenerArtifactPaths({
+    WHATSAPP_INBOX_PATH: '/data/inbox.jsonl',
+    WHATSAPP_LISTENER_STATE_PATH: '/data/listener-state.json',
+    WHATSAPP_UNREAD_FLAG_PATH: '/data/unread.flag',
+  }, '/app'), {
+    inboxPath: '/data/inbox.jsonl',
+    statePath: '/data/listener-state.json',
+    unreadFlagPath: '/data/unread.flag',
+  });
+});
 
 test('single-account listener keeps the historical poll, inbox row, and webhook', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-listener-'));

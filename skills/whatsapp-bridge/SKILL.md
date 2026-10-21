@@ -47,11 +47,14 @@ nohup ./start-listener.sh > /tmp/wa-listener.log 2>&1 &
 
 `start-listener.sh` must **not** `source .env` with bare bash if values contain spaces — parse quoted `.env` (python + `shlex.quote`) then `exec node listener.mjs`.
 
+Docker (Synology Container Manager or any other host) is additive: `Dockerfile` + `docker-compose.yml`, documented in `docs/docker-synology.md`. `./start.sh` and `./pair.sh` stay valid. Publish `127.0.0.1:3100` only. Never put the bridge on the public internet. Session state is the `wa-session` / `wa-sessions` volumes; do not delete them on upgrade.
+
 ## .env keys
 
 | Key | Purpose |
 |-----|---------|
 | `WHATSAPP_BRIDGE_PORT` | default `3100` |
+| `WHATSAPP_BIND_HOST` | unset = `127.0.0.1`. Docker image uses `0.0.0.0` inside the container; the host publish stays loopback |
 | `WHATSAPP_MODE` | `bot` \| `self-chat` |
 | `WHATSAPP_ALLOWED_USERS` | comma-separated digits (required for inbound) |
 | `WHATSAPP_PROGRAMMATIC_ACK` | fixed ack text; empty = off |

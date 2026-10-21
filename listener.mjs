@@ -14,6 +14,19 @@ import { loadAccountConfigs } from './accounts_config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+export function listenerArtifactPaths(env = process.env, dir = __dirname) {
+  function pick(key, filename) {
+    const value = env?.[key];
+    if (value == null || String(value).trim() === '') return path.join(dir, filename);
+    return String(value);
+  }
+  return {
+    inboxPath: pick('WHATSAPP_INBOX_PATH', 'inbox.jsonl'),
+    statePath: pick('WHATSAPP_LISTENER_STATE_PATH', 'listener-state.json'),
+    unreadFlagPath: pick('WHATSAPP_UNREAD_FLAG_PATH', 'unread.flag'),
+  };
+}
+
 function parseAllowlist(raw) {
   return new Set(
     String(raw || '')
@@ -296,6 +309,7 @@ function isDirectRun() {
 
 if (isDirectRun()) {
   const cfg = loadAccountConfigs({ env: process.env, cwd: process.cwd() });
+  const paths = listenerArtifactPaths(process.env, __dirname);
   const listener = createInboxListener({
     bridge: process.env.WHATSAPP_BRIDGE_URL || 'http://127.0.0.1:3100',
     multi: cfg.multi,
@@ -304,9 +318,9 @@ if (isDirectRun()) {
     defaultWakeUrl: process.env.WHATSAPP_WAKE_WEBHOOK_URL || '',
     defaultWakeAuth: process.env.WHATSAPP_WAKE_WEBHOOK_AUTH || process.env.WHATSAPP_WAKE_AUTHORIZATION || '',
     pollMs: Number(process.env.WHATSAPP_POLL_MS || 2000),
-    inboxPath: path.join(__dirname, 'inbox.jsonl'),
-    statePath: path.join(__dirname, 'listener-state.json'),
-    unreadFlagPath: path.join(__dirname, 'unread.flag'),
+    inboxPath: paths.inboxPath,
+    statePath: paths.statePath,
+    unreadFlagPath: paths.unreadFlagPath,
   });
   listener.start().catch((err) => {
     console.error(err);

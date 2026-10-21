@@ -701,6 +701,25 @@ function readNonNegativeMs(env, name, fallback) {
   return Math.round(parsed);
 }
 
+const LISTEN_HOSTS = new Set(['127.0.0.1', '::1', '0.0.0.0', '::']);
+
+/**
+ * Bare metal leaves this unset and keeps listening on 127.0.0.1.
+ * Docker sets 0.0.0.0 so a published `127.0.0.1:port` mapping can reach the
+ * process (bridge networking never delivers that traffic to the container
+ * loopback). The HTTP Host allowlist stays loopback-only either way.
+ */
+export function resolveListenHost(env = process.env) {
+  const raw = String(env?.WHATSAPP_BIND_HOST ?? '').trim();
+  if (!raw) return '127.0.0.1';
+  if (!LISTEN_HOSTS.has(raw)) {
+    throw new Error(
+      `WHATSAPP_BIND_HOST="${raw}" is not allowed. Use 127.0.0.1 (bare metal default) or 0.0.0.0 inside a container whose published port is bound to 127.0.0.1.`,
+    );
+  }
+  return raw;
+}
+
 /** `WHATSAPP_RECONNECT_BASE_MS` / `WHATSAPP_RECONNECT_CAP_MS`, otherwise 3s and 60s. */
 export function readReconnectTiming(env = process.env) {
   return {
