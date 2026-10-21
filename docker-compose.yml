@@ -17,8 +17,9 @@ services:
       - no-new-privileges:true
     environment:
       # Wildcard inside the container so the published loopback port can connect.
-      # Host-header checks still allow loopback names only.
+      # Host-header checks still allow loopback names, plus the Compose DNS name below.
       WHATSAPP_BIND_HOST: "0.0.0.0"
+      WHATSAPP_TRUSTED_HOSTS: bridge
       WHATSAPP_SESSION_DIR: /app/session
       HOME: /home/node
     ports:
@@ -54,15 +55,14 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
-    # Same network namespace as the bridge so /health sees Host: 127.0.0.1.
-    network_mode: "service:bridge"
     depends_on:
       bridge:
         condition: service_healthy
     command: ["listener"]
     environment:
       HOME: /home/node
-      WHATSAPP_BRIDGE_URL: http://127.0.0.1:${WHATSAPP_BRIDGE_PORT:-3100}
+      # Compose DNS name. Survives a bridge recreate; 127.0.0.1 would be this container.
+      WHATSAPP_BRIDGE_URL: http://bridge:${WHATSAPP_BRIDGE_PORT:-3100}
       WHATSAPP_INBOX_PATH: /app/listener-data/inbox.jsonl
       WHATSAPP_LISTENER_STATE_PATH: /app/listener-data/listener-state.json
       WHATSAPP_UNREAD_FLAG_PATH: /app/listener-data/unread.flag

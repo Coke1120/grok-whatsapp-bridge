@@ -37,14 +37,16 @@ assert "0.0.0.0:" not in port
 assert bridge["restart"] == "unless-stopped"
 assert bridge["env_file"] == ".env"
 assert bridge["environment"]["WHATSAPP_BIND_HOST"] == "0.0.0.0"
+assert bridge["environment"]["WHATSAPP_TRUSTED_HOSTS"] == "bridge"
 assert bridge["environment"]["WHATSAPP_SESSION_DIR"] == "/app/session"
 assert "/health" in " ".join(bridge["healthcheck"]["test"])
 assert "wa-session:/app/session" in bridge["volumes"]
 assert "wa-sessions:/app/sessions" in bridge["volumes"]
 assert listener["profiles"] == ["listener"]
 assert listener["restart"] == "unless-stopped"
-assert listener["network_mode"] == "service:bridge"
+assert "network_mode" not in listener
 assert listener["command"] == ["listener"]
+assert listener["environment"]["WHATSAPP_BRIDGE_URL"].startswith("http://bridge:")
 assert listener["environment"]["WHATSAPP_INBOX_PATH"] == "/app/listener-data/inbox.jsonl"
 assert "wa-listener:/app/listener-data" in listener["volumes"]
 assert pair["profiles"] == ["pair"]
@@ -64,6 +66,7 @@ test('Dockerfile is a Node 22 multi-stage image that healthchecks /health', () =
   assert.match(docker, /npm ci --omit=dev/);
   assert.match(docker, /setpriv/);
   assert.match(docker, /\/health/);
+  assert.doesNotMatch(docker, /^EXPOSE /m);
   assert.match(docker, /ENTRYPOINT \["\/usr\/local\/bin\/docker-entrypoint\.sh"\]/);
   assert.match(docker, /CMD \["bridge"\]/);
 });

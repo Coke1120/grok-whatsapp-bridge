@@ -35,7 +35,7 @@ import { fileURLToPath } from 'url';
 import { fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import { createVersionResolver, installConsoleStamps, readReconnectTiming, resolveListenHost, writeJsonLine } from './bridge_helpers.js';
 import { accountForPairing, loadAccountConfigs, resolveRuntimeConfig } from './accounts_config.js';
-import { createBridgeApp } from './account_http.js';
+import { createBridgeApp, parseTrustedHosts } from './account_http.js';
 import { createAccountRuntime } from './account_runtime.js';
 import { formatAccountStartupLines, formatPairingLines } from './bridge_startup.js';
 
@@ -157,6 +157,7 @@ export async function main(argvEnv = process.env) {
     defaultName: config.defaultName,
     multi: config.multi,
     scriptHash: scriptHash(),
+    trustedHosts: parseTrustedHosts(argvEnv.WHATSAPP_TRUSTED_HOSTS),
   });
   if (host !== '127.0.0.1') {
     console.log(`HTTP bind ${host}:${port}. Publish this port on 127.0.0.1 only.`);

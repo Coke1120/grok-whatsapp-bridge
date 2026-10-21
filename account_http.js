@@ -14,6 +14,24 @@ function hostOnly(raw) {
   ).replace(/^\[|\]$/g, '').toLowerCase();
 }
 
+const TRUSTED_HOST_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
+
+/** Compose sets this to the service name `bridge`. Public hostnames stay rejected. */
+export function parseTrustedHosts(raw) {
+  const hosts = [];
+  for (const part of String(raw || '').split(',')) {
+    const host = part.trim().toLowerCase();
+    if (!host) continue;
+    if (!TRUSTED_HOST_RE.test(host) || host.length > 253) {
+      throw new Error(
+        `WHATSAPP_TRUSTED_HOSTS entry "${host}" must be a hostname such as bridge.`,
+      );
+    }
+    hosts.push(host);
+  }
+  return hosts;
+}
+
 function selectorsOf(req) {
   return {
     path: String(req.params?.account || '').trim(),
@@ -27,10 +45,15 @@ export function createBridgeApp({
   defaultName,
   multi,
   scriptHash,
+  trustedHosts = [],
   uptime = () => process.uptime(),
 }) {
   const byName = new Map(accounts.map((account) => [account.name, account]));
   const names = accounts.map((account) => account.name);
+  const allowedHosts = new Set([
+    ...LOOPBACK_HOSTS,
+    ...trustedHosts.map((host) => String(host).trim().toLowerCase()).filter(Boolean),
+  ]);
   const app = express();
   app.use(express.json());
 
@@ -39,7 +62,7 @@ export function createBridgeApp({
     if (!raw) {
       return res.status(400).json({ error: 'Missing Host header' });
     }
-    if (!LOOPBACK_HOSTS.has(hostOnly(raw))) {
+    if (!allowedHosts.has(hostOnly(raw))) {
       return res.status(400).json({
         error: 'Invalid Host header. Bridge accepts loopback hosts only.',
       });
