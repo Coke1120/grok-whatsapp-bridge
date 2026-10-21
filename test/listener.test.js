@@ -14,6 +14,19 @@ function jsonResponse(body, status = 200) {
   };
 }
 
+test('listener bridge URL defaults to 127.0.0.1:37100 when unset', () => {
+  const listener = createInboxListener({
+    accounts: [{ name: 'default', allowedUsers: '111' }],
+    inboxPath: '/tmp/wa-default-port-inbox',
+    statePath: '/tmp/wa-default-port-state',
+    unreadFlagPath: '/tmp/wa-default-port-flag',
+  });
+  assert.equal(
+    listener.banner(),
+    '[listener] bridge=http://127.0.0.1:37100 allow=111 ack=off wake=off',
+  );
+});
+
 test('listener files stay beside the script unless Docker overrides them', () => {
   assert.deepEqual(listenerArtifactPaths({}, '/app'), {
     inboxPath: '/app/inbox.jsonl',
@@ -40,7 +53,7 @@ test('single-account listener keeps the historical poll, inbox row, and webhook'
   const calls = [];
   try {
     const listener = createInboxListener({
-      bridge: 'http://127.0.0.1:3100',
+      bridge: 'http://127.0.0.1:37100',
       multi: false,
       accounts: [{ name: 'default', allowedUsers: '+111', programmaticAck: null, wakeWebhookUrl: null, wakeWebhookAuth: null }],
       defaultAck: '',
@@ -68,7 +81,7 @@ test('single-account listener keeps the historical poll, inbox row, and webhook'
 
     const lines = [];
     const started = createInboxListener({
-      bridge: 'http://127.0.0.1:3100',
+      bridge: 'http://127.0.0.1:37100',
       multi: false,
       accounts: [{ name: 'default', allowedUsers: '111', programmaticAck: null, wakeWebhookUrl: null, wakeWebhookAuth: null }],
       defaultAck: '',
@@ -83,7 +96,7 @@ test('single-account listener keeps the historical poll, inbox row, and webhook'
     });
     await started.start();
     await started.stop();
-    assert.equal(lines[0], '[listener] bridge=http://127.0.0.1:3100 allow=111 ack=off wake=on');
+    assert.equal(lines[0], '[listener] bridge=http://127.0.0.1:37100 allow=111 ack=off wake=on');
 
     await listener.tick();
     await listener.tick();
@@ -111,7 +124,7 @@ test('multi-account listener polls, wakes, and acks each account separately', as
   const calls = [];
   try {
     const listener = createInboxListener({
-      bridge: 'http://127.0.0.1:3100',
+      bridge: 'http://127.0.0.1:37100',
       multi: true,
       accounts: [
         {
@@ -165,8 +178,8 @@ test('multi-account listener polls, wakes, and acks each account separately', as
 
     const polled = calls.filter((call) => call.options === undefined || call.options.method === undefined).map((call) => call.url);
     assert.deepEqual(polled, [
-      'http://127.0.0.1:3100/accounts/ops/messages',
-      'http://127.0.0.1:3100/accounts/sales/messages',
+      'http://127.0.0.1:37100/accounts/ops/messages',
+      'http://127.0.0.1:37100/accounts/sales/messages',
     ]);
     const wakes = calls.filter((call) => String(call.url).includes('example.invalid'));
     assert.equal(wakes.length, 1);
@@ -176,7 +189,7 @@ test('multi-account listener polls, wakes, and acks each account separately', as
 
     const acks = calls.filter((call) => call.options?.method === 'POST' && String(call.url).endsWith('/send'));
     assert.equal(acks.length, 1);
-    assert.equal(acks[0].url, 'http://127.0.0.1:3100/accounts/ops/send');
+    assert.equal(acks[0].url, 'http://127.0.0.1:37100/accounts/ops/send');
     assert.deepEqual(JSON.parse(acks[0].options.body), { chatId: '111@s.whatsapp.net', message: 'ack-ops' });
 
     const rows = readFileSync(path.join(dir, 'inbox.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));

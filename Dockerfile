@@ -13,7 +13,7 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     HOME=/home/node \
-    WHATSAPP_BRIDGE_PORT=3100 \
+    WHATSAPP_BRIDGE_PORT=37100 \
     WHATSAPP_MODE=bot \
     WHATSAPP_SESSION_DIR=/app/session \
     WHATSAPP_BIND_HOST=0.0.0.0
@@ -33,6 +33,6 @@ RUN chmod 755 /usr/local/bin/docker-entrypoint.sh \
     && chown -R node:node /app/session /app/sessions /app/listener-data
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["node", "-e", "const p=process.env.WHATSAPP_BRIDGE_PORT||'3100';fetch('http://127.0.0.1:'+p+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+  CMD ["node", "-e", "const p=process.env.WHATSAPP_BRIDGE_PORT||'37100';fetch('http://127.0.0.1:'+p+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["bridge"]

@@ -5,7 +5,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
-PORT="${WHATSAPP_BRIDGE_PORT:-3100}"
+PORT="${WHATSAPP_BRIDGE_PORT:-37100}"
 SESSION="${WHATSAPP_SESSION_DIR:-$ROOT/session}"
 mkdir -p "$SESSION"
 export WHATSAPP_MODE="${WHATSAPP_MODE:-bot}"

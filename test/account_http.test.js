@@ -332,10 +332,10 @@ test('Compose service name is opt-in and other hosts stay rejected', async () =>
     }));
   }
 
-  const blocked = await ask(plain, 'bridge:3100');
+  const blocked = await ask(plain, 'bridge:37100');
   assert.equal(blocked.status, 400);
 
-  const allowed = await ask(trusted, 'bridge:3100');
+  const allowed = await ask(trusted, 'bridge:37100');
   assert.equal(allowed.status, 200);
   assert.equal(allowed.json.status, 'connected');
 

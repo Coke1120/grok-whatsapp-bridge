@@ -31,7 +31,7 @@ Based on [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agen
 
 The same paths exist under `/accounts/<name>/...`. A header `X-WhatsApp-Account: <name>` or `?account=<name>` selects an account too. If two selectors disagree, the bridge returns 400.
 
-Default bind: `127.0.0.1:3100`.
+Default bind: `127.0.0.1:37100`.
 
 ## Quick start
 
@@ -43,7 +43,7 @@ cp .env.example .env
 npm ci
 ./pair.sh              # scan QR: WhatsApp → Linked Devices
 ./start.sh             # keep running (tmux/systemd)
-curl -s http://127.0.0.1:3100/health
+curl -s http://127.0.0.1:37100/health
 ./start-listener.sh    # optional: allowlist poll + inbox.jsonl + webhook
 ```
 
@@ -51,13 +51,13 @@ curl -s http://127.0.0.1:3100/health
 
 `./start.sh`, `./pair.sh`, and `./start-listener.sh` stay the bare-metal path. `Dockerfile` and `docker-compose.yml` are an extra way to run the same processes.
 
-**Never publish the bridge to the open internet.** Compose maps `127.0.0.1:3100` on the host only. Do not change that to `3100:3100`, do not forward the port, and do not use Tailscale Funnel. The HTTP API has no login.
+**Never publish the bridge to the open internet.** Compose maps `127.0.0.1:37100` on the host only. Do not change that to `37100:37100`, do not forward the port, and do not use Tailscale Funnel. The HTTP API has no login.
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
 docker compose logs -f bridge    # first QR; session stays on the wa-session volume
-curl -sS http://127.0.0.1:3100/health
+curl -sS http://127.0.0.1:37100/health
 docker compose --profile listener up -d
 ```
 
@@ -92,8 +92,8 @@ cp accounts.example.json accounts.json   # gitignored; or accounts/<name>.env fr
 # point "primary" sessionDir at the existing ./session
 ./pair.sh sales                          # QR for that account only
 ./start.sh
-curl -sS http://127.0.0.1:3100/health
-curl -sS -X POST http://127.0.0.1:3100/accounts/sales/send \
+curl -sS http://127.0.0.1:37100/health
+curl -sS -X POST http://127.0.0.1:37100/accounts/sales/send \
   -H 'content-type: application/json' \
   -d '{"chatId":"<jid>","message":"hi"}'
 ```
