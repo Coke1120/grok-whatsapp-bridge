@@ -10,7 +10,7 @@ ACCOUNT="${1:-${WHATSAPP_ACCOUNT:-}}"
 if [[ -n "$ACCOUNT" ]]; then
   # shellcheck disable=SC1091
   eval "$(python3 "$ROOT/load_dotenv.py" "$ROOT/.env")"
-  PORT="${WHATSAPP_BRIDGE_PORT:-3100}"
+  PORT="${WHATSAPP_BRIDGE_PORT:-37100}"
   export WHATSAPP_MODE="${WHATSAPP_MODE:-bot}"
   if [[ ! -d node_modules ]]; then
     npm ci
@@ -34,7 +34,7 @@ if [[ -n "$ACCOUNT" ]]; then
   exit "$code"
 fi
 
-PORT="${WHATSAPP_BRIDGE_PORT:-3100}"
+PORT="${WHATSAPP_BRIDGE_PORT:-37100}"
 SESSION="${WHATSAPP_SESSION_DIR:-$ROOT/session}"
 mkdir -p "$SESSION"
 export WHATSAPP_MODE="${WHATSAPP_MODE:-bot}"

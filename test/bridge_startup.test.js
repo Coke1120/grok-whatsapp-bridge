@@ -4,7 +4,7 @@ import { formatAccountStartupLines, formatPairingLines } from '../bridge_startup
 
 test('single-account listen banner matches the historical lines', () => {
   const lines = formatAccountStartupLines({
-    port: 3100,
+    port: 37100,
     multi: false,
     defaultName: 'default',
     accounts: [{
@@ -17,7 +17,7 @@ test('single-account listen banner matches the historical lines', () => {
     }],
   });
   assert.deepEqual(lines, [
-    '🌉 WhatsApp bridge listening on port 3100 (mode: bot)',
+    '🌉 WhatsApp bridge listening on port 37100 (mode: bot)',
     '📁 Session stored in: ./session',
     '🔒 No WHATSAPP_ALLOWED_USERS set — incoming messages are rejected.',
     '   Set WHATSAPP_ALLOWED_USERS=<phone> to authorize specific users,',
@@ -28,7 +28,7 @@ test('single-account listen banner matches the historical lines', () => {
 
 test('self-chat, allowlist, pairing policy, and owner-forward lines stay word for word', () => {
   const selfChat = formatAccountStartupLines({
-    port: 3100,
+    port: 37100,
     multi: false,
     defaultName: 'default',
     accounts: [{
@@ -63,7 +63,7 @@ test('self-chat, allowlist, pairing policy, and owner-forward lines stay word fo
   );
 
   const pairing = formatAccountStartupLines({
-    port: 3100,
+    port: 37100,
     multi: false,
     defaultName: 'default',
     accounts: [{
@@ -80,7 +80,7 @@ test('self-chat, allowlist, pairing policy, and owner-forward lines stay word fo
 
 test('multi-account banner names every account and keeps the same policy lines', () => {
   const lines = formatAccountStartupLines({
-    port: 3100,
+    port: 37100,
     multi: true,
     defaultName: 'ops',
     accounts: [
@@ -102,7 +102,7 @@ test('multi-account banner names every account and keeps the same policy lines',
       },
     ],
   });
-  assert.equal(lines[0], '🌉 WhatsApp bridge listening on port 3100 (accounts: ops, sales; default: ops)');
+  assert.equal(lines[0], '🌉 WhatsApp bridge listening on port 37100 (accounts: ops, sales; default: ops)');
   assert.ok(lines.includes('[ops] 📁 Session stored in: ./session'));
   assert.ok(lines.includes('[sales] 📁 Session stored in: ./sessions/sales'));
   assert.ok(lines.includes('[ops] 🔒 Allowed users: 111'));

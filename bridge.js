@@ -23,8 +23,8 @@
  *   ?account=name
  *
  * Usage:
- *   node bridge.js --port 3000 --session ~/.hermes/whatsapp/session
- *   node bridge.js --port 3100                 # multi, from WHATSAPP_ACCOUNTS or accounts/*.env
+ *   node bridge.js --session ~/.hermes/whatsapp/session
+ *   node bridge.js                                 # WHATSAPP_BRIDGE_PORT, else 37100
  *   node bridge.js --pair-only --account sales
  */
 
@@ -123,7 +123,9 @@ export async function main(argvEnv = process.env) {
 
   let config = loadAccountConfigs({ env: argvEnv, cwd: process.cwd(), cli });
   config = resolveRuntimeConfig(config, cli);
-  const port = parseInt(getArg('port', '3000'), 10);
+  // --port wins. Otherwise WHATSAPP_BRIDGE_PORT, else 37100 (start.sh, Compose, .env.example).
+  // An explicit `--port 3000` still works; 3000 is not this repo's unset default.
+  const port = parseInt(getArg('port', argvEnv.WHATSAPP_BRIDGE_PORT || '37100'), 10);
   const getWAVersion = createVersionResolver(fetchLatestBaileysVersion);
   const shared = { multi: config.multi, pairOnly, pairJson, getWAVersion };
 

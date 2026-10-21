@@ -8,7 +8,7 @@ cd "$ROOT"
 # shellcheck disable=SC1091
 eval "$(python3 "$ROOT/load_dotenv.py" "$ROOT/.env")"
 ACCOUNT="${1:-}"
-PORT="${WHATSAPP_BRIDGE_PORT:-3100}"
+PORT="${WHATSAPP_BRIDGE_PORT:-37100}"
 if [[ -n "$ACCOUNT" ]]; then
   URL="http://127.0.0.1:${PORT}/accounts/${ACCOUNT}/logout"
 else

@@ -59,6 +59,34 @@ print("ok")
   assert.match(result.stdout, /ok/);
 });
 
+test('unset bridge HTTP port defaults to 37100', () => {
+  const compose = read('docker-compose.yml');
+  assert.match(compose, /127\.0\.0\.1:\$\{WHATSAPP_BRIDGE_PORT:-37100\}:\$\{WHATSAPP_BRIDGE_PORT:-37100\}/);
+  assert.match(compose, /http:\/\/bridge:\$\{WHATSAPP_BRIDGE_PORT:-37100\}/);
+  assert.match(compose, /WHATSAPP_BRIDGE_PORT\|\|'37100'/);
+  assert.doesNotMatch(compose, /3100/);
+
+  const docker = read('Dockerfile');
+  assert.match(docker, /WHATSAPP_BRIDGE_PORT=37100/);
+  assert.match(docker, /WHATSAPP_BRIDGE_PORT\|\|'37100'/);
+  assert.doesNotMatch(docker, /3100/);
+
+  for (const name of [
+    'docker-entrypoint.sh',
+    'start.sh',
+    'pair.sh',
+    'logout.sh',
+    'start-listener.sh',
+    '.env.example',
+    'listener.mjs',
+    'bridge.js',
+  ]) {
+    const text = read(name);
+    assert.match(text, /37100/, name);
+    assert.doesNotMatch(text, /3100/, name);
+  }
+});
+
 test('Dockerfile is a Node 22 multi-stage image that healthchecks /health', () => {
   const docker = read('Dockerfile');
   assert.match(docker, /FROM node:22-bookworm-slim AS deps/);

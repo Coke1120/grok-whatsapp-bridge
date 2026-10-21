@@ -2,7 +2,7 @@
 
 The image runs the same `bridge.js` / `listener.mjs` as `./start.sh` and `./start-listener.sh`. Bare metal keeps using those scripts. Docker does not replace them.
 
-**Never publish the bridge to the open internet.** The HTTP API has no authentication. Compose binds `127.0.0.1` on the host. Do not change that to `3100:3100` or `0.0.0.0:3100:3100`, do not forward the port on the router, do not put it behind Web Station or a public reverse proxy, and do not use Tailscale Funnel. Reach it from the NAS itself, an SSH tunnel, or Tailscale Serve to loopback. See [ADR 0002](adr/0002-docker-loopback-publish.md).
+**Never publish the bridge to the open internet.** The HTTP API has no authentication. Compose binds `127.0.0.1` on the host. Do not change that to `37100:37100` or `0.0.0.0:37100:37100`, do not forward the port on the router, do not put it behind Web Station or a public reverse proxy, and do not use Tailscale Funnel. Reach it from the NAS itself, an SSH tunnel, or Tailscale Serve to loopback. See [ADR 0002](adr/0002-docker-loopback-publish.md).
 
 The image listens on `0.0.0.0` **inside the container** so Docker's port mapping can connect. Requests still need a loopback `Host` (`127.0.0.1` or `localhost`). A LAN IP in the `Host` header gets HTTP 400.
 
@@ -24,7 +24,7 @@ chmod 600 .env
 # Set WHATSAPP_ALLOWED_USERS to E.164 digits, no plus.
 docker compose up -d --build
 docker compose logs -f bridge          # first-time QR
-curl -sS http://127.0.0.1:3100/health
+curl -sS http://127.0.0.1:37100/health
 ```
 
 `WHATSAPP_SESSION_DIR` in `.env` is overridden inside the container to `/app/session`, which is the `wa-session` volume. A host path in that variable is not used.
@@ -49,24 +49,24 @@ DSM 7.2+ with Container Manager. The NAS needs outbound internet for the first i
 4. Container Manager → **Project** → **Create**.
 5. Project name: `grok-whatsapp-bridge`. Keep this name. Volume names are prefixed with it (`grok-whatsapp-bridge_wa-session`). A different project name attaches empty volumes and looks like a logout.
 6. Path: the folder that already contains `docker-compose.yml`. Use that file. If the wizard shows the YAML, leave the port as `127.0.0.1:...`.
-7. Do not enable a Web Station portal, a QuickConnect port, or a router forward for 3100. Do not turn on high privilege.
+7. Do not enable a Web Station portal, a QuickConnect port, or a router forward for 37100. Do not turn on high privilege.
 8. Build and start. The first build pulls `node:22-bookworm-slim` and runs `npm ci`.
 9. Open the bridge container log, or from SSH: `sudo docker compose logs -f bridge`. Scan the QR (WhatsApp → Linked devices).
-10. On the NAS, over SSH: `curl -sS http://127.0.0.1:3100/health`. `status` stays `disconnected` or `connecting` until the scan finishes. HTTP 200 from `/health` means the process is up, not that WhatsApp is linked.
+10. On the NAS, over SSH: `curl -sS http://127.0.0.1:37100/health`. `status` stays `disconnected` or `connecting` until the scan finishes. HTTP 200 from `/health` means the process is up, not that WhatsApp is linked.
 11. Container Manager → **Volume**. Keep `grok-whatsapp-bridge_wa-session` and `grok-whatsapp-bridge_wa-sessions`. Deleting them deletes the WhatsApp login.
 
 Older DSM builds may only have the `docker-compose` command (with a hyphen). Use whichever one is installed. A plain Project start does **not** pass `--profile listener`.
 
 ## Listener
 
-The listener is off unless you enable the `listener` profile. It calls `http://bridge:3100` on the Compose network (the service name is allowed as `WHATSAPP_TRUSTED_HOSTS=bridge`). That keeps working when the bridge container is recreated. Inbox files live in the `wa-listener` volume (`/app/listener-data`), not in the image. Do not add a public hostname to `WHATSAPP_TRUSTED_HOSTS`.
+The listener is off unless you enable the `listener` profile. It calls `http://bridge:37100` on the Compose network (the service name is allowed as `WHATSAPP_TRUSTED_HOSTS=bridge`). That keeps working when the bridge container is recreated. Inbox files live in the `wa-listener` volume (`/app/listener-data`), not in the image. Do not add a public hostname to `WHATSAPP_TRUSTED_HOSTS`.
 
 ```bash
 sudo docker compose --profile listener up -d
 sudo docker compose logs -f listener
 ```
 
-The listener log should show `bridge=http://bridge:3100`. If the NAS can `curl http://127.0.0.1:3100/health` and the listener still logs `fetch failed`, the host is dropping packets between containers on the project network. Container Manager allows that traffic by default.
+The listener log should show `bridge=http://bridge:37100`. If the NAS can `curl http://127.0.0.1:37100/health` and the listener still logs `fetch failed`, the host is dropping packets between containers on the project network. Container Manager allows that traffic by default.
 
 To start it from the Container Manager project screen, edit the project YAML and delete the listener service's `profiles:` line, then build again. The one-shot `pair` service is different: it joins the bridge container's network namespace so it can pause that account on `127.0.0.1`. Run it only while that bridge container is the one currently running.
 
@@ -77,17 +77,17 @@ From a laptop, the NAS loopback is not your loopback. Two ways in:
 **SSH tunnel**
 
 ```bash
-ssh -L 3100:127.0.0.1:3100 user@nas
-curl -sS http://127.0.0.1:3100/health
+ssh -L 37100:127.0.0.1:37100 user@nas
+curl -sS http://127.0.0.1:37100/health
 ```
 
 **Tailscale Serve** (tailnet only), with the Tailscale package or container on the NAS:
 
 ```bash
-sudo tailscale serve --bg 3100
+sudo tailscale serve --bg 37100
 ```
 
-That proxies the tailnet to `http://127.0.0.1:3100` and keeps a loopback `Host`. Do not run `tailscale funnel`. Funnel puts the bridge on the public internet.
+That proxies the tailnet to `http://127.0.0.1:37100` and keeps a loopback `Host`. Do not run `tailscale funnel`. Funnel puts the bridge on the public internet.
 
 If a client gets `Invalid Host header`, the proxy forwarded a public or LAN name. Point the upstream at `127.0.0.1` and do not rewrite `Host` to the tailnet or QuickConnect name.
 

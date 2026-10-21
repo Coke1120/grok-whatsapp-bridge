@@ -35,7 +35,7 @@ Suggested checks (every few minutes or your existing health cron):
 
 ```bash
 pgrep -af 'bridge.js|listener.mjs'   # both if you use the listener
-curl -sS http://127.0.0.1:3100/health   # expect {"status":"connected",...}
+curl -sS http://127.0.0.1:37100/health   # expect {"status":"connected",...}
 ```
 
 Allowed auto-actions:
@@ -62,9 +62,9 @@ Each configured account has its own socket, reconnect timer, and attempt counter
 Do not delete every session directory because one account needs a QR. Pause or log out that account, then pair it.
 
 ```bash
-curl -sS -X POST http://127.0.0.1:3100/accounts/sales/pause
+curl -sS -X POST http://127.0.0.1:37100/accounts/sales/pause
 ./pair.sh sales
-curl -sS -X POST http://127.0.0.1:3100/accounts/sales/resume
+curl -sS -X POST http://127.0.0.1:37100/accounts/sales/resume
 ```
 
 `./pair.sh <name>` pauses and, after a successful scan, resumes that account when the bridge is already up.
