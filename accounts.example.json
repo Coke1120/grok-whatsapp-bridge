@@ -1,0 +1,16 @@
+{
+  "default": "primary",
+  "accounts": [
+    {
+      "name": "primary",
+      "sessionDir": "./session",
+      "mode": "bot"
+    },
+    {
+      "name": "sales",
+      "sessionDir": "./sessions/sales",
+      "mode": "bot",
+      "allowedUsers": ""
+    }
+  ]
+}
