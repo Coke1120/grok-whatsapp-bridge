@@ -55,6 +55,7 @@ Docker (Synology Container Manager or any other host) is additive: `Dockerfile` 
 |-----|---------|
 | `WHATSAPP_BRIDGE_PORT` | default `3100` |
 | `WHATSAPP_BIND_HOST` | unset = `127.0.0.1`. Docker image uses `0.0.0.0` inside the container; the host publish stays loopback |
+| `WHATSAPP_TRUSTED_HOSTS` | unset on bare metal. Compose sets `bridge` so the listener may call `http://bridge:3100`. Do not put a public hostname here |
 | `WHATSAPP_MODE` | `bot` \| `self-chat` |
 | `WHATSAPP_ALLOWED_USERS` | comma-separated digits (required for inbound) |
 | `WHATSAPP_PROGRAMMATIC_ACK` | fixed ack text; empty = off |

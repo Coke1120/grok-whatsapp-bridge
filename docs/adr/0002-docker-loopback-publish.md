@@ -12,9 +12,9 @@ Accepted. 2026-10-21.
 
 - Compose publishes `127.0.0.1:${WHATSAPP_BRIDGE_PORT}:${WHATSAPP_BRIDGE_PORT}` only.
 - The image sets `WHATSAPP_BIND_HOST=0.0.0.0`. Allowed values are `127.0.0.1`, `::1`, `0.0.0.0`, and `::`. Unset still means `127.0.0.1`, which is what `./start.sh` keeps doing.
-- The Host allowlist is unchanged. Callers use `http://127.0.0.1:3100` from the NAS, an SSH tunnel, or Tailscale Serve aimed at that loopback address. Tailscale Funnel and a public port publish are out of scope.
+- The Host allowlist stays loopback, plus an explicit `WHATSAPP_TRUSTED_HOSTS` list. Compose sets that to the service name `bridge` so the listener can call `http://bridge:3100`. A public hostname is not added. Callers on the NAS still use `http://127.0.0.1:3100`, an SSH tunnel, or Tailscale Serve aimed at that loopback address. Tailscale Funnel and a public port publish are out of scope.
 - Named volumes `wa-session` (`/app/session`) and `wa-sessions` (`/app/sessions/<name>`) hold Baileys state. The entrypoint chowns them to the `node` user and drops root with `setpriv`.
-- The optional listener shares the bridge container's network namespace so its polls use `Host: 127.0.0.1`. It is a Compose profile and is not started by a plain `up`.
+- The optional listener is a Compose profile on the project network, not started by a plain `up`. It uses the `bridge` DNS name so a bridge recreate does not leave it stuck in the old network namespace. The one-shot `pair` service does share the bridge network namespace, because it has to pause the live socket on `127.0.0.1`.
 - The container healthcheck is "GET /health returns HTTP 200". It stays healthy while WhatsApp is `connecting` or waiting for a QR. `restart: unless-stopped` is the outer process restart. It must not delete volumes.
 
 ## Consequences

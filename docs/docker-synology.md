@@ -59,14 +59,16 @@ Older DSM builds may only have the `docker-compose` command (with a hyphen). Use
 
 ## Listener
 
-The listener is off unless you enable the `listener` profile. It shares the bridge network namespace and polls `http://127.0.0.1:3100`. Inbox files live in the `wa-listener` volume (`/app/listener-data`), not in the image.
+The listener is off unless you enable the `listener` profile. It calls `http://bridge:3100` on the Compose network (the service name is allowed as `WHATSAPP_TRUSTED_HOSTS=bridge`). That keeps working when the bridge container is recreated. Inbox files live in the `wa-listener` volume (`/app/listener-data`), not in the image. Do not add a public hostname to `WHATSAPP_TRUSTED_HOSTS`.
 
 ```bash
 sudo docker compose --profile listener up -d
 sudo docker compose logs -f listener
 ```
 
-To start it from the Container Manager project screen, edit the project YAML and delete the listener service's `profiles:` line, then build again. Putting the listener on the Compose network under the hostname `bridge` fails the loopback Host check (HTTP 400). Leave `network_mode: "service:bridge"`.
+The listener log should show `bridge=http://bridge:3100`. If the NAS can `curl http://127.0.0.1:3100/health` and the listener still logs `fetch failed`, the host is dropping packets between containers on the project network. Container Manager allows that traffic by default.
+
+To start it from the Container Manager project screen, edit the project YAML and delete the listener service's `profiles:` line, then build again. The one-shot `pair` service is different: it joins the bridge container's network namespace so it can pause that account on `127.0.0.1`. Run it only while that bridge container is the one currently running.
 
 ## Tailscale and SSH
 

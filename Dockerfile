@@ -32,7 +32,6 @@ RUN chmod 755 /usr/local/bin/docker-entrypoint.sh \
     && mkdir -p /app/session /app/sessions /app/listener-data \
     && chown -R node:node /app/session /app/sessions /app/listener-data
 
-EXPOSE 3100
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["node", "-e", "const p=process.env.WHATSAPP_BRIDGE_PORT||'3100';fetch('http://127.0.0.1:'+p+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

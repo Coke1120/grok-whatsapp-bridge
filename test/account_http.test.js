@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import test from 'node:test';
-import { createBridgeApp } from '../account_http.js';
+import { createBridgeApp, parseTrustedHosts } from '../account_http.js';
 
 function fakeAccount(name, overrides = {}) {
   const calls = [];
@@ -291,6 +291,56 @@ test('invalid Host header is rejected', async () => {
     assert.equal(response.status, 400);
     assert.equal(response.json.error, 'Invalid Host header. Bridge accepts loopback hosts only.');
   });
+});
+
+test('Compose service name is opt-in and other hosts stay rejected', async () => {
+  assert.deepEqual(parseTrustedHosts(' bridge ,'), ['bridge']);
+  assert.deepEqual(parseTrustedHosts(''), []);
+  assert.throws(() => parseTrustedHosts('http://bridge'), /WHATSAPP_TRUSTED_HOSTS/);
+
+  const plain = createBridgeApp({
+    accounts: [fakeAccount('default')],
+    defaultName: 'default',
+    multi: false,
+    scriptHash: 'hash',
+    uptime: () => 1,
+  });
+  const trusted = createBridgeApp({
+    accounts: [fakeAccount('default')],
+    defaultName: 'default',
+    multi: false,
+    scriptHash: 'hash',
+    trustedHosts: parseTrustedHosts('bridge'),
+    uptime: () => 1,
+  });
+
+  function ask(app, host) {
+    return withApp(app, (port) => new Promise((resolve, reject) => {
+      const request = http.request({
+        hostname: '127.0.0.1',
+        port,
+        path: '/health',
+        method: 'GET',
+        headers: { host },
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, json: JSON.parse(data) }));
+      });
+      request.on('error', reject);
+      request.end();
+    }));
+  }
+
+  const blocked = await ask(plain, 'bridge:3100');
+  assert.equal(blocked.status, 400);
+
+  const allowed = await ask(trusted, 'bridge:3100');
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.json.status, 'connected');
+
+  const evil = await ask(trusted, 'evil.example');
+  assert.equal(evil.status, 400);
 });
 
 test('logout and pause target the selected account', async () => {
