@@ -688,14 +688,76 @@ export function redactWhatsAppId(value) {
   return `${suffix ? `…${suffix}` : '…'}${domainPart ? `@${domainPart}` : ''}`;
 }
 
+export const DEFAULT_RECONNECT_BASE_MS = 3000;
+export const DEFAULT_RECONNECT_CAP_MS = 60_000;
+export const DEFAULT_RECONNECT_RESTART_MS = 1000;
+export const DEFAULT_RECONNECT_JITTER_RATIO = 0.2;
+
+function readNonNegativeMs(env, name, fallback) {
+  const raw = env?.[name];
+  if (raw == null || String(raw).trim() === '') return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.round(parsed);
+}
+
+/** `WHATSAPP_RECONNECT_BASE_MS` / `WHATSAPP_RECONNECT_CAP_MS`, otherwise 3s and 60s. */
+export function readReconnectTiming(env = process.env) {
+  return {
+    baseMs: readNonNegativeMs(env, 'WHATSAPP_RECONNECT_BASE_MS', DEFAULT_RECONNECT_BASE_MS),
+    capMs: readNonNegativeMs(env, 'WHATSAPP_RECONNECT_CAP_MS', DEFAULT_RECONNECT_CAP_MS),
+  };
+}
+
+export function formatReconnectDelay(delayMs) {
+  const ms = Math.max(0, Number(delayMs) || 0);
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${Math.round(ms / 1000)}s`;
+}
+
+/**
+ * Delay for a non-logout close. `attempt` is how many failures are already
+ * outstanding (0 = first close). Jitter is ±`jitterRatio` around the
+ * exponential, then clamped to `[0, cap]`. `random()` of 0.5 is zero jitter.
+ */
+export function computeReconnectDelayMs(attempt, {
+  baseMs = DEFAULT_RECONNECT_BASE_MS,
+  capMs = DEFAULT_RECONNECT_CAP_MS,
+  jitterRatio = DEFAULT_RECONNECT_JITTER_RATIO,
+  random = Math.random,
+} = {}) {
+  const safeAttempt = Math.max(0, Math.min(16, attempt | 0));
+  const base = Math.max(0, Number(baseMs) || 0);
+  const cap = Math.max(0, Number(capMs) || 0);
+  const exponential = Math.min(cap, base * (2 ** safeAttempt));
+  const spread = Number.isFinite(jitterRatio) ? Math.max(0, jitterRatio) : 0;
+  const roll = typeof random === 'function' ? Number(random()) : 0.5;
+  const unit = Number.isFinite(roll) ? Math.min(1, Math.max(0, roll)) : 0.5;
+  const jitter = exponential * spread * ((unit * 2) - 1);
+  return Math.max(0, Math.min(cap, Math.round(exponential + jitter)));
+}
+
 export function createReconnectScheduler(startFn, {
-  retryDelayMs = 5000,
+  retryDelayMs,
+  baseMs = retryDelayMs ?? DEFAULT_RECONNECT_BASE_MS,
+  capMs = DEFAULT_RECONNECT_CAP_MS,
+  restartDelayMs = DEFAULT_RECONNECT_RESTART_MS,
+  jitterRatio = DEFAULT_RECONNECT_JITTER_RATIO,
+  random = Math.random,
   log = console.log,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
 } = {}) {
   let timer = null;
   let stopped = false;
+  let attempt = 0;
+  const timing = { baseMs, capMs, jitterRatio, random };
+
+  function takeFailureDelay() {
+    const delayMs = computeReconnectDelayMs(attempt, timing);
+    attempt += 1;
+    return delayMs;
+  }
 
   function scheduleReconnect(delayMs) {
     if (stopped) return;
@@ -709,13 +771,29 @@ export function createReconnectScheduler(startFn, {
         })
         .catch((err) => {
           if (stopped) return undefined;
-          log(`⚠️  Reconnect failed (${err?.message || err}). Retrying in ${Math.round(retryDelayMs / 1000)}s...`);
-          scheduleReconnect(retryDelayMs);
+          const delay = takeFailureDelay();
+          log(`⚠️  Reconnect failed (${err?.message || err}). Retrying in ${formatReconnectDelay(delay)}...`);
+          scheduleReconnect(delay);
           return undefined;
         });
     }, delayMs);
   }
 
+  /**
+   * Schedule the next socket start after a close.
+   * Code 515 (`restartRequested`) stays on the short delay and does not
+   * advance the exponential counter. Every other non-logout close does.
+   */
+  scheduleReconnect.afterClose = ({ restartRequested = false } = {}) => {
+    if (stopped) return 0;
+    const delayMs = restartRequested ? restartDelayMs : takeFailureDelay();
+    scheduleReconnect(delayMs);
+    return delayMs;
+  };
+  scheduleReconnect.noteOpen = () => {
+    attempt = 0;
+  };
+  scheduleReconnect.attempt = () => attempt;
   scheduleReconnect.cancel = () => {
     stopped = true;
     if (timer) clearTimeoutFn(timer);
@@ -723,6 +801,7 @@ export function createReconnectScheduler(startFn, {
   };
   scheduleReconnect.enable = () => {
     stopped = false;
+    attempt = 0;
   };
   return scheduleReconnect;
 }

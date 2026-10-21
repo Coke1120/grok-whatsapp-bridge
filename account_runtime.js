@@ -23,6 +23,10 @@ import {
   addMentions,
   buildPollPayload,
   createReconnectScheduler,
+  DEFAULT_RECONNECT_BASE_MS,
+  DEFAULT_RECONNECT_CAP_MS,
+  DEFAULT_RECONNECT_JITTER_RATIO,
+  formatReconnectDelay,
   buildLocationPayload,
   buildTextSendPayload,
   createBoundedMessageStore,
@@ -75,7 +79,11 @@ export function createAccountRuntime(options) {
     debug = false,
     setTimeoutFn = setTimeout,
     clearTimeoutFn = clearTimeout,
-    reconnectRetryMs = 5000,
+    reconnectRetryMs,
+    reconnectBaseMs = reconnectRetryMs ?? DEFAULT_RECONNECT_BASE_MS,
+    reconnectCapMs = DEFAULT_RECONNECT_CAP_MS,
+    reconnectJitterRatio = DEFAULT_RECONNECT_JITTER_RATIO,
+    reconnectRandom = Math.random,
     deps = {},
   } = options;
 
@@ -325,15 +333,17 @@ export function createAccountRuntime(options) {
         }
         connectionState = 'disconnected';
         emitPairEvent({ event: 'disconnected', reason });
+        const restartRequested = reason === 515;
+        const delayMs = scheduleReconnect.afterClose({ restartRequested });
         if (!pairJson) {
-          if (reason === 515) log('↻ WhatsApp requested restart (code 515). Reconnecting...');
-          else log(`⚠️  Connection closed (reason: ${reason}). Reconnecting in 3s...`);
+          if (restartRequested) log('↻ WhatsApp requested restart (code 515). Reconnecting...');
+          else log(`⚠️  Connection closed (reason: ${reason}). Reconnecting in ${formatReconnectDelay(delayMs)}...`);
         }
-        scheduleReconnect(reason === 515 ? 1000 : 3000);
         return;
       }
 
       if (connection === 'open') {
+        scheduleReconnect.noteOpen();
         connectionState = 'connected';
         const connectedUser = created.user
           ? { id: created.user.id || null, name: created.user.name || created.user.verifiedName || null }
@@ -681,7 +691,10 @@ export function createAccountRuntime(options) {
   }
 
   const scheduleReconnect = createReconnectScheduler(() => startSocket(), {
-    retryDelayMs: reconnectRetryMs,
+    baseMs: reconnectBaseMs,
+    capMs: reconnectCapMs,
+    jitterRatio: reconnectJitterRatio,
+    random: reconnectRandom,
     log,
     setTimeoutFn,
     clearTimeoutFn,

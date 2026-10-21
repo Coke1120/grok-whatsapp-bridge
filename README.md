@@ -59,7 +59,7 @@ Do **not** cron-poll the agent just to watch WhatsApp.
 
 ## Reconnect vs outer watchdog
 
-Socket drops (often reason **408**) are handled **inside** `bridge.js`: that socket waits a few seconds and connects again. With no multi config, `loggedOut` exits the process and needs a manual re-pair. With multi config, only that account stops.
+Socket drops (often reason **408** or **428**) are handled **inside** the bridge: that account waits with exponential backoff (about 3s, doubling up to about 60s) and connects again. An open connection resets that account's counter. With no multi config, `loggedOut` exits the process and needs a manual re-pair. With multi config, only that account stops.
 
 An optional **outer** watchdog only restarts the process if Node died or `/health` stays not `connected` for minutes — it must never delete `session/`.
 

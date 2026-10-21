@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createInboxListener } from '../listener.mjs';
+import { classifyBridgeResponse, createInboxListener } from '../listener.mjs';
 
 function jsonResponse(body, status = 200) {
   return {
@@ -204,6 +204,123 @@ test('a non-allowlisted inbound is logged and does not wake', async () => {
     assert.equal(row.allowed, false);
     assert.equal(calls.some((call) => call.url === 'https://example.invalid/wake'), false);
     assert.equal(calls.some((call) => String(call.url).endsWith('/send')), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('classifyBridgeResponse treats 408, 503, and not-connected health as transient', () => {
+  assert.deepEqual(classifyBridgeResponse(408, { error: 'Request Timeout' }), { kind: 'transient', reason: 'HTTP 408' });
+  assert.deepEqual(classifyBridgeResponse(503, { error: 'Not connected to WhatsApp' }), { kind: 'transient', reason: 'HTTP 503' });
+  assert.deepEqual(classifyBridgeResponse(200, { status: 'disconnected' }), { kind: 'transient', reason: 'status disconnected' });
+  assert.deepEqual(classifyBridgeResponse(200, { status: 'connecting' }), { kind: 'transient', reason: 'status connecting' });
+  assert.deepEqual(classifyBridgeResponse(200, { error: 'Not connected' }), { kind: 'transient', reason: 'not-connected' });
+  assert.deepEqual(classifyBridgeResponse(200, { status: 'logged_out' }), { kind: 'hard', reason: 'status logged_out' });
+  assert.deepEqual(classifyBridgeResponse(404, { error: 'Unknown WhatsApp account' }), { kind: 'hard', reason: 'HTTP 404' });
+  assert.equal(classifyBridgeResponse(200, []).kind, 'ok');
+});
+
+test('a reconnecting poll retries with short backoff, warns once, and keeps polling', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-listener-retry-'));
+  const warnings = [];
+  const info = [];
+  const sleeps = [];
+  let polls = 0;
+  try {
+    const listener = createInboxListener({
+      bridge: 'http://bridge',
+      multi: false,
+      accounts: [{ name: 'default', allowedUsers: '111', programmaticAck: null, wakeWebhookUrl: null, wakeWebhookAuth: null }],
+      defaultAck: '',
+      defaultWakeUrl: '',
+      defaultWakeAuth: '',
+      pollRetryDelays: [10, 20],
+      sleep: async (ms) => { sleeps.push(ms); },
+      inboxPath: path.join(dir, 'inbox.jsonl'),
+      statePath: path.join(dir, 'state.json'),
+      unreadFlagPath: path.join(dir, 'unread.flag'),
+      log: (line) => info.push(line),
+      warn: (line) => warnings.push(line),
+      fetch: async () => {
+        polls += 1;
+        if (polls < 3) return jsonResponse({ error: 'Not connected to WhatsApp' }, 503);
+        if (polls === 3) {
+          return jsonResponse([{
+            messageId: 'm-retry',
+            chatId: '111@s.whatsapp.net',
+            senderId: '111@s.whatsapp.net',
+            senderName: 'Ada',
+            body: 'back',
+            hasMedia: false,
+          }]);
+        }
+        return jsonResponse({ status: 'disconnected' }, 503);
+      },
+    });
+
+    await listener.tick();
+    assert.deepEqual(sleeps, [10, 20]);
+    assert.deepEqual(warnings, []);
+    const row = JSON.parse(readFileSync(path.join(dir, 'inbox.jsonl'), 'utf8'));
+    assert.equal(row.body, 'back');
+
+    await listener.tick();
+    await listener.tick();
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0], '[listener] reconnect window (HTTP 503); will keep polling');
+    assert.equal(polls, 7);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a hard poll error is not retried and a sibling account still drains', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-listener-hard-'));
+  const warnings = [];
+  const sleeps = [];
+  const counts = { ops: 0, sales: 0 };
+  try {
+    const listener = createInboxListener({
+      bridge: 'http://bridge',
+      multi: true,
+      accounts: [
+        { name: 'ops', allowedUsers: '111', programmaticAck: null, wakeWebhookUrl: null, wakeWebhookAuth: null },
+        { name: 'sales', allowedUsers: '222', programmaticAck: null, wakeWebhookUrl: null, wakeWebhookAuth: null },
+      ],
+      defaultAck: '',
+      defaultWakeUrl: '',
+      defaultWakeAuth: '',
+      pollRetryDelays: [5, 5, 5],
+      sleep: async (ms) => { sleeps.push(ms); },
+      inboxPath: path.join(dir, 'inbox.jsonl'),
+      statePath: path.join(dir, 'state.json'),
+      unreadFlagPath: path.join(dir, 'unread.flag'),
+      log() {},
+      warn: (line) => warnings.push(line),
+      fetch: async (url) => {
+        if (String(url).endsWith('/ops/messages')) {
+          counts.ops += 1;
+          return jsonResponse({ error: 'Unknown WhatsApp account' }, 404);
+        }
+        counts.sales += 1;
+        return jsonResponse([{
+          messageId: 's1',
+          chatId: '222@s.whatsapp.net',
+          senderId: '222@s.whatsapp.net',
+          senderName: 'Sales',
+          body: 'ok',
+          hasMedia: false,
+        }]);
+      },
+    });
+    await listener.tick();
+    await listener.tick();
+    assert.deepEqual(sleeps, []);
+    assert.deepEqual(warnings, ['[listener] poll err ops HTTP 404']);
+    assert.equal(counts.ops, 2);
+    assert.equal(counts.sales, 2);
+    const rows = readFileSync(path.join(dir, 'inbox.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    assert.deepEqual(rows.map((row) => row.account), ['sales']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

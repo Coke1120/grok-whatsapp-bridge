@@ -58,6 +58,8 @@ nohup ./start-listener.sh > /tmp/wa-listener.log 2>&1 &
 | `WHATSAPP_WAKE_WEBHOOK_URL` | routine webhook URL (secret form) |
 | `WHATSAPP_WAKE_WEBHOOK_AUTH` | `Bearer …` only (strip leading `Authorization:` if the panel gave the full header) |
 | `WHATSAPP_POLL_MS` | listener poll interval (default 2000) |
+| `WHATSAPP_RECONNECT_BASE_MS` | first non-logout reconnect delay (default 3000) |
+| `WHATSAPP_RECONNECT_CAP_MS` | backoff cap (default 60000) |
 | `WHATSAPP_ACCOUNTS` | optional JSON or path; unset = single session |
 | `WHATSAPP_DEFAULT_ACCOUNT` | which account unqualified `/send` and `/messages` use |
 
@@ -67,7 +69,7 @@ Collect URL/auth via a masked secret form — never ask the user to paste secret
 
 Files: `listener.mjs`, `start-listener.sh`. Artifacts: `inbox.jsonl`, `unread.flag`, `listener-state.json`.
 
-1. Poll `GET /messages` every `WHATSAPP_POLL_MS`. With multi-account config, poll each `/accounts/<name>/messages` instead (the shipped listener does this).
+1. Poll `GET /messages` every `WHATSAPP_POLL_MS`. With multi-account config, poll each `/accounts/<name>/messages` instead (the shipped listener does this). HTTP 408/503, a not-connected body, or health `disconnected` / `connecting` / `reconnecting` is a reconnect window: retry that poll a few times, warn once, and keep looping. Other HTTP errors warn once and are not retried.
 2. Dedupe; append to `inbox.jsonl`; skip non-allowlist.
 3. If `WHATSAPP_WAKE_WEBHOOK_URL` set: `POST` JSON `{source,chatId,senderId,senderName,body,hasMedia,ts}` with `Authorization` header when auth set. Expect **401** without auth.
 4. Optional fixed ack via `/send` when `WHATSAPP_PROGRAMMATIC_ACK` non-empty (usually off when webhook replies).

@@ -44,6 +44,37 @@ function chosen(accountValue, fallback) {
   return accountValue == null ? fallback : accountValue;
 }
 
+const TRANSIENT_HTTP = new Set([408, 503]);
+const TRANSIENT_HEALTH = new Set(['disconnected', 'connecting', 'reconnecting']);
+const HARD_HEALTH = new Set(['logged_out', 'paused']);
+
+/**
+ * Classify a `/messages` or `/health` payload.
+ * Transient: HTTP 408/503, a "not connected" error, or health
+ * `disconnected` / `connecting` / `reconnecting`.
+ * Hard: other HTTP errors, `logged_out`, `paused`.
+ */
+export function classifyBridgeResponse(status, body) {
+  if (TRANSIENT_HTTP.has(status)) {
+    return { kind: 'transient', reason: `HTTP ${status}` };
+  }
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const error = String(body.error || '');
+    const state = String(body.status || '');
+    if (/not connected/i.test(error) || /not connected/i.test(state)) {
+      return { kind: 'transient', reason: 'not-connected' };
+    }
+    if (TRANSIENT_HEALTH.has(state)) {
+      return { kind: 'transient', reason: `status ${state}` };
+    }
+    if (HARD_HEALTH.has(state)) {
+      return { kind: 'hard', reason: `status ${state}` };
+    }
+  }
+  if (status >= 200 && status < 300) return { kind: 'ok', reason: '' };
+  return { kind: 'hard', reason: `HTTP ${status}` };
+}
+
 export function createInboxListener(options) {
   const bridge = options.bridge || 'http://127.0.0.1:3100';
   const multi = !!options.multi;
@@ -58,6 +89,9 @@ export function createInboxListener(options) {
   const fetchImpl = options.fetch || globalThis.fetch;
   const log = options.log || ((line) => console.log(line));
   const warn = options.warn || ((line) => console.error(line));
+  const pollRetryDelays = options.pollRetryDelays || [250, 500, 1000];
+  const sleep = options.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const outages = new Map();
 
   function loadState() {
     try {
@@ -173,20 +207,67 @@ export function createInboxListener(options) {
     }
   }
 
-  async function tick() {
-    for (const target of targets()) {
-      let messages;
-      try {
-        const response = await fetchImpl(target.messagesUrl);
-        if (!response.ok) throw new Error(`messages ${response.status}`);
-        messages = await response.json();
-      } catch (err) {
-        warn(`[listener] poll err ${err.message}`);
-        continue;
+  function outageLabel(target) {
+    return multi ? ` ${target.name}` : '';
+  }
+
+  async function readPoll(url) {
+    try {
+      const response = await fetchImpl(url);
+      const text = typeof response.text === 'function' ? await response.text() : '';
+      let body = text;
+      if (text) {
+        try { body = JSON.parse(text); } catch { body = text; }
+      } else if (typeof response.json === 'function') {
+        body = await response.json();
       }
-      await handleMessages(messages, target);
+      return { ...classifyBridgeResponse(response.status, body), body };
+    } catch (err) {
+      return { kind: 'transient', reason: err?.message || String(err), body: null };
     }
-    saveState();
+  }
+
+  async function pollMessages(target) {
+    const inOutage = outages.has(target.name);
+    const attempts = inOutage ? 1 : (pollRetryDelays.length + 1);
+    let last = null;
+    for (let i = 0; i < attempts; i += 1) {
+      last = await readPoll(target.messagesUrl);
+      if (last.kind === 'ok') {
+        if (outages.delete(target.name)) log(`[listener] poll resumed${outageLabel(target)}`);
+        return last.body;
+      }
+      if (last.kind === 'hard') break;
+      if (i < attempts - 1) await sleep(pollRetryDelays[i]);
+    }
+    const kind = last?.kind === 'hard' ? 'hard' : 'transient';
+    const reason = last?.reason || 'poll failed';
+    const prev = outages.get(target.name);
+    if (!prev || prev.kind !== kind || prev.reason !== reason) {
+      outages.set(target.name, { kind, reason });
+      if (kind === 'transient') {
+        warn(`[listener] reconnect window${outageLabel(target)} (${reason}); will keep polling`);
+      } else {
+        warn(`[listener] poll err${outageLabel(target)} ${reason}`);
+      }
+    }
+    return null;
+  }
+
+  let running = false;
+  async function tick() {
+    if (running) return;
+    running = true;
+    try {
+      for (const target of targets()) {
+        const messages = await pollMessages(target);
+        if (messages == null) continue;
+        await handleMessages(messages, target);
+      }
+      saveState();
+    } finally {
+      running = false;
+    }
   }
 
   let timer = null;

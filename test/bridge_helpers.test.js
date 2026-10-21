@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createReconnectScheduler, redactWhatsAppId } from '../bridge_helpers.js';
+import {
+  computeReconnectDelayMs,
+  createReconnectScheduler,
+  readReconnectTiming,
+  redactWhatsAppId,
+} from '../bridge_helpers.js';
 
 function createClock() {
   let seq = 1;
@@ -24,6 +29,11 @@ function createClock() {
         for (const item of batch) item.fn();
         await new Promise((resolve) => setImmediate(resolve));
       }
+    },
+    async fireOne() {
+      const item = items.shift();
+      if (!item) return;
+      await item.fn();
     },
   };
 }
@@ -74,4 +84,76 @@ test('cancel drops a scheduled reconnect and ignores an in-flight failure', asyn
   resumed(0);
   await clock.flush();
   assert.equal(starts, 1);
+});
+
+test('reconnect delay doubles from 3s to a 60s cap, with jitter around the center', () => {
+  assert.equal(computeReconnectDelayMs(0, { random: () => 0.5 }), 3000);
+  assert.equal(computeReconnectDelayMs(1, { random: () => 0.5 }), 6000);
+  assert.equal(computeReconnectDelayMs(2, { random: () => 0.5 }), 12000);
+  assert.equal(computeReconnectDelayMs(4, { random: () => 0.5 }), 48000);
+  assert.equal(computeReconnectDelayMs(5, { random: () => 0.5 }), 60000);
+  assert.equal(computeReconnectDelayMs(8, { random: () => 0.5 }), 60000);
+  assert.equal(computeReconnectDelayMs(0, { random: () => 0 }), 2400);
+  assert.equal(computeReconnectDelayMs(0, { random: () => 1 }), 3600);
+  assert.equal(computeReconnectDelayMs(5, { random: () => 1 }), 60000);
+  assert.equal(computeReconnectDelayMs(0, { baseMs: 3000, capMs: 1000, random: () => 0.5 }), 1000);
+});
+
+test('reconnect timing env knobs fall back to 3s and 60s', () => {
+  assert.deepEqual(readReconnectTiming({}), { baseMs: 3000, capMs: 60000 });
+  assert.deepEqual(readReconnectTiming({
+    WHATSAPP_RECONNECT_BASE_MS: '',
+    WHATSAPP_RECONNECT_CAP_MS: 'nope',
+  }), { baseMs: 3000, capMs: 60000 });
+  assert.deepEqual(readReconnectTiming({
+    WHATSAPP_RECONNECT_BASE_MS: '4000',
+    WHATSAPP_RECONNECT_CAP_MS: '15000',
+  }), { baseMs: 4000, capMs: 15000 });
+});
+
+test('close backoff grows per scheduler, 515 stays at 1s, and open resets', async () => {
+  const clock = createClock();
+  const delays = [];
+  let failStarts = 0;
+  const schedule = createReconnectScheduler(
+    () => {
+      failStarts += 1;
+      throw new Error('socket down');
+    },
+    {
+      random: () => 0.5,
+      log: () => {},
+      setTimeoutFn: (fn, ms) => {
+        delays.push(ms);
+        return clock.setTimeout(fn, ms);
+      },
+      clearTimeoutFn: clock.clearTimeout,
+    },
+  );
+
+  assert.equal(schedule.afterClose(), 3000);
+  assert.equal(schedule.afterClose(), 6000);
+  assert.equal(schedule.afterClose({ restartRequested: true }), 1000);
+  assert.equal(schedule.attempt(), 2);
+
+  const otherClock = createClock();
+  const other = createReconnectScheduler(() => {}, {
+    random: () => 0.5,
+    log: () => {},
+    setTimeoutFn: otherClock.setTimeout,
+    clearTimeoutFn: otherClock.clearTimeout,
+  });
+  assert.equal(other.afterClose(), 3000);
+  assert.equal(other.attempt(), 1);
+
+  schedule.noteOpen();
+  assert.equal(schedule.attempt(), 0);
+  assert.equal(schedule.afterClose(), 3000);
+
+  await clock.fireOne();
+  assert.equal(failStarts, 1);
+  assert.equal(delays.at(-1), 6000);
+  schedule.cancel();
+  await clock.fireOne();
+  assert.equal(failStarts, 1);
 });

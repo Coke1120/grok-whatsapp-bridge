@@ -24,6 +24,9 @@ function createClock() {
     get pending() {
       return items.length;
     },
+    scheduled() {
+      return items.map((item) => item.ms);
+    },
     async flush() {
       for (let i = 0; i < 10 && items.length; i += 1) {
         const batch = items.splice(0, items.length);
@@ -106,7 +109,7 @@ function harness(dir, overrides = {}) {
     cacheDirs: { image: dir, document: dir, audio: dir },
     setTimeoutFn: clock.setTimeout,
     clearTimeoutFn: clock.clearTimeout,
-    reconnectRetryMs: 5000,
+    reconnectRandom: () => 0.5,
     log() {},
     deps: {
       exitProcess(code) { exits.push(code); },
@@ -192,6 +195,58 @@ test('a normal disconnect reconnects only that account', async () => {
     assert.deepEqual(handle.exits, []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('reconnect backoff is per account, resets on open, and 515 stays at 1s', async () => {
+  const dirA = mkdtempSync(path.join(tmpdir(), 'wa-rt-'));
+  const dirB = mkdtempSync(path.join(tmpdir(), 'wa-rt-'));
+  try {
+    const lines = [];
+    const ops = harness(dirA, { multi: true, name: 'ops', log: (line) => lines.push(line) });
+    const sales = harness(dirB, { multi: true, name: 'sales', log() {} });
+    await connect(ops);
+    await connect(sales);
+
+    await ops.sockets[0].emit('connection.update', closeUpdate(408));
+    assert.deepEqual(ops.clock.scheduled(), [3000]);
+    await ops.clock.flush();
+    await ops.sockets[1].emit('connection.update', closeUpdate(428));
+    assert.deepEqual(ops.clock.scheduled(), [6000]);
+    assert.equal(lines.at(-1), '[ops] ⚠️  Connection closed (reason: 428). Reconnecting in 6s...');
+
+    await sales.sockets[0].emit('connection.update', closeUpdate(408));
+    assert.deepEqual(sales.clock.scheduled(), [3000]);
+
+    await ops.clock.flush();
+    await ops.sockets[2].emit('connection.update', closeUpdate(515));
+    assert.deepEqual(ops.clock.scheduled(), [1000]);
+    assert.equal(lines.at(-1), '[ops] ↻ WhatsApp requested restart (code 515). Reconnecting...');
+    await ops.clock.flush();
+    await ops.sockets[3].emit('connection.update', closeUpdate(408));
+    assert.deepEqual(ops.clock.scheduled(), [12000]);
+
+    await ops.clock.flush();
+    await ops.sockets[4].emit('connection.update', { connection: 'open' });
+    await ops.sockets[4].emit('connection.update', closeUpdate(408));
+    assert.deepEqual(ops.clock.scheduled(), [3000]);
+    assert.equal(lines.at(-1), '[ops] ⚠️  Connection closed (reason: 408). Reconnecting in 3s...');
+
+    await sales.clock.flush();
+    await sales.sockets[1].emit('connection.update', closeUpdate(428));
+    assert.deepEqual(sales.clock.scheduled(), [6000]);
+
+    await ops.runtime.pause();
+    assert.equal(ops.clock.pending, 0);
+    await sales.runtime.logout();
+    assert.equal(sales.clock.pending, 0);
+    await ops.clock.flush();
+    await sales.clock.flush();
+    assert.equal(ops.sockets.length, 5);
+    assert.equal(sales.sockets.length, 2);
+  } finally {
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
   }
 });
 
