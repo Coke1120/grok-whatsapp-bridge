@@ -51,7 +51,7 @@ curl -s http://127.0.0.1:37100/health
 
 `./start.sh`, `./pair.sh`, and `./start-listener.sh` stay the bare-metal path. `Dockerfile` is what GitHub Actions builds. `docker-compose.yml` only **pulls**.
 
-Image: `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.1` (and `:latest` on each publish). The repo is public, so `docker pull` does not need a login unless the package is later made private. Pin a tag. Do not attach image tarballs to GitHub Releases.
+Image: `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2` (and `:latest` on each publish). The repo is public, so `docker pull` does not need a login unless the package is later made private. Pin a tag. Do not attach image tarballs to GitHub Releases.
 
 **Never publish the bridge to the open internet.** Compose maps `127.0.0.1:37100` on the host only. Do not change that to `37100:37100`, do not forward the port, and do not use Tailscale Funnel. The HTTP API has no login. `curl` HTTP 200 on `/health` means the process is up, not that WhatsApp is linked. `curl` HTTPS 200 on `https://web.whatsapp.com` is not a working WebSocket (WSS).
 
@@ -71,7 +71,7 @@ Portainer: set variables in the stack environment UI. Do not use a relative `env
 
 If Compose bridge DNS/egress dies (`EAI_AGAIN` for `web.whatsapp.com` inside the container, no QR, close 408) while the NAS host can resolve WhatsApp, use `docker-compose.host-net.yml`: host network and `WHATSAPP_BIND_HOST=127.0.0.1`. That file is not the default. Do not bind `0.0.0.0` on the host network.
 
-WhatsApp → Linked devices may still show **Google Chrome (Hermes Agent)** until an image that contains the rename is running, and usually until the next link. Do not re-pair a working session only to change that label. Image `:v1.3.1` built from git tag `v1.3.1` is older than the rename.
+WhatsApp → Linked devices may still show **Google Chrome (Hermes Agent)** until an image that contains the rename is running, and usually until the next link. Do not re-pair a working session only to change that label. Image `:v1.3.2` (git tag `v1.3.2`) contains the rename. Image `:v1.3.1` built from git tag `v1.3.1` does not.
 
 Full steps (Container Manager, pull vs build, Tailscale / SSH, host network, one-shot pair, upgrade without wiping `session/`): [docs/docker-synology.md](docs/docker-synology.md).
 

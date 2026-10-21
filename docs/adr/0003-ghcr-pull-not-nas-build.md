@@ -14,7 +14,7 @@ The HTTP API is still unauthenticated. [ADR 0002](0002-docker-loopback-publish.m
 
 ## Decision
 
-- GitHub Actions builds `linux/amd64` and `linux/arm64` with Docker Buildx and pushes `ghcr.io/coke1120/grok-whatsapp-bridge`. A published `vX.Y.Z` release or tag pushes `:vX.Y.Z` and `:latest`. `workflow_dispatch` can publish an existing tag (for example `v1.3.1`) without a new release. No image tarball is attached to GitHub Releases.
+- GitHub Actions builds `linux/amd64` and `linux/arm64` with Docker Buildx and pushes `ghcr.io/coke1120/grok-whatsapp-bridge`. A published `vX.Y.Z` release or tag pushes `:vX.Y.Z` and `:latest`. `workflow_dispatch` can republish an existing tag whose commit already contains this workflow. No image tarball is attached to GitHub Releases.
 - `docker-compose.yml` names that image and has no `build:` key. Synology and Portainer pull the pin. They do not run `compose --build`. `Dockerfile` stays the source of truth. Dev hosts may build with `docker-compose.build.yml`. Bare metal still uses `npm ci`, `./start.sh`, and `./start-listener.sh`.
 - The repository is public. Anonymous `docker pull` is the normal path. A later private package would need `docker login ghcr.io` with a classic PAT (`read:packages`). Do not put that token on the NAS while the package is public.
 - Operator settings come from Compose interpolation (project `.env`) or the Portainer stack environment. The compose file does not use a relative `env_file`. `WHATSAPP_TRUSTED_HOSTS` defaults to `bridge` and can be extended (MagicDNS). `WHATSAPP_BIND_HOST` stays `0.0.0.0` in the default file so the loopback publish works. `WHATSAPP_SESSION_DIR` inside the container stays `/app/session`.
@@ -22,7 +22,7 @@ The HTTP API is still unauthenticated. [ADR 0002](0002-docker-loopback-publish.m
 
 ## Consequences
 
-- The image for tag `v1.3.1` is built from git tag `v1.3.1`. Commits after that tag are not in that image until a newer tag is published.
+- The first tag that contains this workflow and the linked-device rename is `v1.3.2`. The image for that tag is built from git tag `v1.3.2`. Git tag `v1.3.1` does not contain the workflow or the rename. Do not publish `v1.3.1` in place of `v1.3.2`.
 - `workflow_dispatch` runs only after this workflow file is on the default branch `main`. Tag and release events use the workflow file in the tagged commit.
 - Deleting `wa-session` or `wa-sessions` still logs WhatsApp out. Pulling a new image does not.
 - Provenance attestations are off so Container Manager's Docker can pull a plain multi-arch index.
