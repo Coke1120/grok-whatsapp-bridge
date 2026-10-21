@@ -5,7 +5,7 @@ set -eu
 umask 077
 
 cd /app
-port="${WHATSAPP_BRIDGE_PORT:-3100}"
+port="${WHATSAPP_BRIDGE_PORT:-37100}"
 session="${WHATSAPP_SESSION_DIR:-/app/session}"
 mode="${WHATSAPP_MODE:-bot}"
 

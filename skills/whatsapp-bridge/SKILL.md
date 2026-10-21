@@ -41,21 +41,21 @@ cp .env.example .env
 npm ci
 ./pair.sh              # QR → Linked Devices
 ./start.sh             # nohup/tmux/systemd
-curl -s http://127.0.0.1:3100/health   # connected
+curl -s http://127.0.0.1:37100/health   # connected
 nohup ./start-listener.sh > /tmp/wa-listener.log 2>&1 &
 ```
 
 `start-listener.sh` must **not** `source .env` with bare bash if values contain spaces — parse quoted `.env` (python + `shlex.quote`) then `exec node listener.mjs`.
 
-Docker (Synology Container Manager or any other host) is additive: `Dockerfile` + `docker-compose.yml`, documented in `docs/docker-synology.md`. `./start.sh` and `./pair.sh` stay valid. Publish `127.0.0.1:3100` only. Never put the bridge on the public internet. Session state is the `wa-session` / `wa-sessions` volumes; do not delete them on upgrade.
+Docker (Synology Container Manager or any other host) is additive: `Dockerfile` + `docker-compose.yml`, documented in `docs/docker-synology.md`. `./start.sh` and `./pair.sh` stay valid. Publish `127.0.0.1:37100` only. Never put the bridge on the public internet. Session state is the `wa-session` / `wa-sessions` volumes; do not delete them on upgrade.
 
 ## .env keys
 
 | Key | Purpose |
 |-----|---------|
-| `WHATSAPP_BRIDGE_PORT` | default `3100` |
+| `WHATSAPP_BRIDGE_PORT` | default `37100` |
 | `WHATSAPP_BIND_HOST` | unset = `127.0.0.1`. Docker image uses `0.0.0.0` inside the container; the host publish stays loopback |
-| `WHATSAPP_TRUSTED_HOSTS` | unset on bare metal. Compose sets `bridge` so the listener may call `http://bridge:3100`. Do not put a public hostname here |
+| `WHATSAPP_TRUSTED_HOSTS` | unset on bare metal. Compose sets `bridge` so the listener may call `http://bridge:37100`. Do not put a public hostname here |
 | `WHATSAPP_MODE` | `bot` \| `self-chat` |
 | `WHATSAPP_ALLOWED_USERS` | comma-separated digits (required for inbound) |
 | `WHATSAPP_PROGRAMMATIC_ACK` | fixed ack text; empty = off |
@@ -121,9 +121,9 @@ Give the existing `./session` directory to the default account (`default` in the
 ```bash
 ./pair.sh sales
 ./start.sh
-curl -sS http://127.0.0.1:3100/health
+curl -sS http://127.0.0.1:37100/health
 # status/session describe the default account; accounts[] lists each status
-curl -sS -X POST http://127.0.0.1:3100/accounts/sales/send \
+curl -sS -X POST http://127.0.0.1:37100/accounts/sales/send \
   -H 'content-type: application/json' \
   -d '{"chatId":"<jid from inbox>","message":"hi"}'
 ```
@@ -151,9 +151,9 @@ Per-account allowlist: `allowedUsers` / `WHATSAPP_ALLOWED_USERS` on that account
 Re-pair without logout (bridge already running):
 
 ```bash
-curl -sS -X POST http://127.0.0.1:3100/accounts/sales/pause
+curl -sS -X POST http://127.0.0.1:37100/accounts/sales/pause
 ./pair.sh sales
-curl -sS -X POST http://127.0.0.1:3100/accounts/sales/resume
+curl -sS -X POST http://127.0.0.1:37100/accounts/sales/resume
 ```
 
 Single-session `./logout.sh` still ends the bridge process after unlink. Multi-account `loggedOut` does not. Do not `rm -rf session` when only one named account needs a new QR.
@@ -173,7 +173,7 @@ Ask the user to unlink the old device in WhatsApp → Linked Devices if it still
 ## Health checklist
 
 - `pgrep -af 'bridge.js|listener.mjs'`
-- `curl -s localhost:3100/health`
+- `curl -s localhost:37100/health`
 - Tail `/tmp/wa-bridge.log`, `/tmp/wa-listener.log` (look for `wake 200` vs `401`)
 - Latest `inbox.jsonl`
 

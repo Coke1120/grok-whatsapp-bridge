@@ -89,7 +89,7 @@ export function classifyBridgeResponse(status, body) {
 }
 
 export function createInboxListener(options) {
-  const bridge = options.bridge || 'http://127.0.0.1:3100';
+  const bridge = options.bridge || 'http://127.0.0.1:37100';
   const multi = !!options.multi;
   const accounts = options.accounts || [];
   const defaultAck = options.defaultAck ?? '';
@@ -311,7 +311,7 @@ if (isDirectRun()) {
   const cfg = loadAccountConfigs({ env: process.env, cwd: process.cwd() });
   const paths = listenerArtifactPaths(process.env, __dirname);
   const listener = createInboxListener({
-    bridge: process.env.WHATSAPP_BRIDGE_URL || 'http://127.0.0.1:3100',
+    bridge: process.env.WHATSAPP_BRIDGE_URL || 'http://127.0.0.1:37100',
     multi: cfg.multi,
     accounts: cfg.accounts,
     defaultAck: process.env.WHATSAPP_PROGRAMMATIC_ACK ?? '',

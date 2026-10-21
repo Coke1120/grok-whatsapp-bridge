@@ -23,8 +23,8 @@ services:
       WHATSAPP_SESSION_DIR: /app/session
       HOME: /home/node
     ports:
-      # Host loopback only. Do not change this to "3100:3100" or "0.0.0.0:3100:3100".
-      - "127.0.0.1:${WHATSAPP_BRIDGE_PORT:-3100}:${WHATSAPP_BRIDGE_PORT:-3100}"
+      # Host loopback only. Do not change this to "37100:37100" or "0.0.0.0:37100:37100".
+      - "127.0.0.1:${WHATSAPP_BRIDGE_PORT:-37100}:${WHATSAPP_BRIDGE_PORT:-37100}"
     volumes:
       # Single account and the default/primary account (./session).
       - wa-session:/app/session
@@ -35,7 +35,7 @@ services:
       # - ./accounts.json:/app/accounts.json:ro
     healthcheck:
       # HTTP is up. This stays green while WhatsApp is connecting or showing a QR.
-      test: ["CMD", "node", "-e", "const p=process.env.WHATSAPP_BRIDGE_PORT||'3100';fetch('http://127.0.0.1:'+p+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "const p=process.env.WHATSAPP_BRIDGE_PORT||'37100';fetch('http://127.0.0.1:'+p+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -62,7 +62,7 @@ services:
     environment:
       HOME: /home/node
       # Compose DNS name. Survives a bridge recreate; 127.0.0.1 would be this container.
-      WHATSAPP_BRIDGE_URL: http://bridge:${WHATSAPP_BRIDGE_PORT:-3100}
+      WHATSAPP_BRIDGE_URL: http://bridge:${WHATSAPP_BRIDGE_PORT:-37100}
       WHATSAPP_INBOX_PATH: /app/listener-data/inbox.jsonl
       WHATSAPP_LISTENER_STATE_PATH: /app/listener-data/listener-state.json
       WHATSAPP_UNREAD_FLAG_PATH: /app/listener-data/unread.flag
