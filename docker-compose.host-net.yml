@@ -17,8 +17,10 @@
 #
 # Tailscale Serve via MagicDNS can send Host: <name>.ts.net and get HTTP 400
 # until WHATSAPP_TRUSTED_HOSTS includes that name. Set it in the project .env
-# or the Portainer stack environment (the base file reads it). Example:
-#   WHATSAPP_TRUSTED_HOSTS=bridge,leohofamily.tail48056.ts.net
+# or the Portainer stack environment (the base file reads it). Primary Serve
+# is the Mac mini (leos-mac-mini.tail48056.ts.net). Older NAS example was
+# leohofamily.tail48056.ts.net. Example:
+#   WHATSAPP_TRUSTED_HOSTS=bridge,leos-mac-mini.tail48056.ts.net
 # Do not put a public hostname there.
 
 services:
