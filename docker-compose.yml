@@ -20,8 +20,9 @@ x-app-env: &app-env
   WHATSAPP_BIND_HOST: "0.0.0.0"
   # Default `bridge` is the Compose DNS name. Set WHATSAPP_TRUSTED_HOSTS in
   # `.env` or Portainer to extend it (Tailscale Serve MagicDNS). A public name
-  # does not belong here. Example:
-  # WHATSAPP_TRUSTED_HOSTS=bridge,leohofamily.tail48056.ts.net
+  # does not belong here. Primary Serve is the Mac mini. Older NAS example
+  # was leohofamily.tail48056.ts.net. Example:
+  # WHATSAPP_TRUSTED_HOSTS=bridge,leos-mac-mini.tail48056.ts.net
   WHATSAPP_TRUSTED_HOSTS: ${WHATSAPP_TRUSTED_HOSTS:-bridge}
   WHATSAPP_SESSION_DIR: /app/session
   HOME: /home/node

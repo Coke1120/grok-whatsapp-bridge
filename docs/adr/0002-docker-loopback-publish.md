@@ -25,6 +25,8 @@ Accepted. 2026-10-21.
 
 ## Amendment (2026-10-21)
 
-`WHATSAPP_TRUSTED_HOSTS` still defaults to the Compose service name `bridge`. It is no longer hardcoded over the project env, so `.env` or the Portainer stack environment can extend it. Tailscale Serve via MagicDNS sends that MagicDNS name as `Host` and gets HTTP 400 until the list includes it (example: `bridge,leohofamily.tail48056.ts.net`). A public hostname is still not added. Funnel stays out.
+`WHATSAPP_TRUSTED_HOSTS` still defaults to the Compose service name `bridge`. It is no longer hardcoded over the project env, so `.env` or the Portainer stack environment can extend it. Tailscale Serve via MagicDNS sends that MagicDNS name as `Host` and gets HTTP 400 until the list includes it (example at the time: `bridge,leohofamily.tail48056.ts.net`). A public hostname is still not added. Funnel stays out.
+
+Current Primary Serve (Mac mini) is `leos-mac-mini.tail48056.ts.net`. Use that name in `WHATSAPP_TRUSTED_HOSTS` for Serve (`bridge,leos-mac-mini.tail48056.ts.net` when the Compose listener still needs `bridge`). NAS Docker is an optional / legacy path, not Primary.
 
 When Container Manager's bridge network cannot resolve or reach WhatsApp (`EAI_AGAIN` inside the container, no QR, close 408) while the NAS host can, use the optional `docker-compose.host-net.yml` overlay: `network_mode: host`, no published ports, `WHATSAPP_BIND_HOST=127.0.0.1`. That overlay is not the default. Host networking with `0.0.0.0` is still rejected by this ADR. Image build and publish are [ADR 0003](0003-ghcr-pull-not-nas-build.md).
