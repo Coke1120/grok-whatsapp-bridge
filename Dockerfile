@@ -5,11 +5,21 @@
 # The entrypoint starts as root so it can chown session volumes, then drops to node.
 
 FROM node:22-bookworm-slim AS deps
+# Slim bases ship a stale CA bundle until apt refreshes ca-certificates.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 FROM node:22-bookworm-slim AS runtime
+# Runtime TLS (WhatsApp) uses this stage's trust store, not the deps stage.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production \
     HOME=/home/node \

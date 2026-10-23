@@ -85,7 +85,7 @@ curl -sS --max-time 3 https://leos-mac-mini.tail48056.ts.net/health
 
 Not Primary. `./start.sh`, `./pair.sh`, and `./start-listener.sh` stay the Mac mini / bare-metal path. `Dockerfile` is what GitHub Actions builds. `docker-compose.yml` only **pulls**.
 
-Image: `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2` (and `:latest` on each publish). The repo is public, so `docker pull` does not need a login unless the package is later made private. Pin a tag. Do not attach image tarballs to GitHub Releases.
+Image: `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.3` (and `:latest` on each publish). The repo is public, so `docker pull` does not need a login unless the package is later made private. Pin a tag. Do not attach image tarballs to GitHub Releases.
 
 **Never publish the bridge to the open internet.** Compose maps `127.0.0.1:37100` on the host only. Do not change that to `37100:37100`, do not forward the port, and do not use Tailscale Funnel. The HTTP API has no login. `curl` HTTP 200 on `/health` means the process is up, not that WhatsApp is linked. `curl` HTTPS 200 on `https://web.whatsapp.com` is not a working WebSocket (WSS).
 

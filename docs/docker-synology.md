@@ -19,10 +19,10 @@ Image: `ghcr.io/coke1120/grok-whatsapp-bridge`
 | `:vX.Y.Z` | GitHub Release published, or a `vX.Y.Z` tag push, or Actions **Publish GHCR image** with that tag. This is the pin. |
 | `:latest` | Same publish. Do not pin the NAS to `:latest`. |
 
-`docker-compose.yml` pins `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2` on `bridge`, `listener`, and `pair`. Change all three when you move the pin (the YAML anchor `bridge-image` is one value).
+`docker-compose.yml` pins `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.3` on `bridge`, `listener`, and `pair`. Change all three when you move the pin (the YAML anchor `bridge-image` is one value).
 
 ```bash
-docker pull ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2
+docker pull ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.3
 ```
 
 The repository is public. Anonymous pull is the normal path. You do not `docker login` on the NAS. GitHub sometimes creates the first package as private; the publish workflow asks for public visibility. If `docker pull` is denied, an owner sets the package to **Public** once on the package page. Do not put a registry token on the NAS. If the package is later made private, `docker login ghcr.io` needs a classic PAT with `read:packages`.
