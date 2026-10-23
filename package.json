@@ -1,6 +1,6 @@
 {
   "name": "grok-whatsapp-bridge",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "Grok WhatsApp Bridge: standalone WhatsApp Baileys HTTP bridge with allowlist listener and optional webhook wake",
   "private": false,
   "type": "module",

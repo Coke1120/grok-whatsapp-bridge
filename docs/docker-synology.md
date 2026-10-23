@@ -1,6 +1,10 @@
 # Docker and Synology
 
-The image runs the same `bridge.js` / `listener.mjs` as `./start.sh` and `./start-listener.sh`. Bare metal keeps using those scripts. Docker does not replace them. `Dockerfile` is the image source of truth. GitHub Actions builds it. The NAS pulls the result.
+> **Optional / legacy ops path. Not Primary.**
+>
+> Current Primary ops is the **Mac mini** with **Tailscale Serve** at `https://leos-mac-mini.tail48056.ts.net/`. `GET /health` there returns HTTP 200 when the process is up (`status: connected` once linked, or still waiting for a QR). The Synology / NAS bridge has been cleaned and is **not** in use as Primary. This page keeps the NAS Docker tutorial for that optional capability. Do not treat it as the deployment to run today. Mac mini setup is in the README section **Primary ops: Mac mini + Tailscale Serve**.
+
+The image runs the same `bridge.js` / `listener.mjs` as `./start.sh` and `./start-listener.sh`. Bare metal (the Mac mini) keeps using those scripts. Docker does not replace them. `Dockerfile` is the image source of truth. GitHub Actions builds it. A NAS that still runs this optional path pulls the result.
 
 **Never publish the bridge to the open internet.** The HTTP API has no authentication. The default compose file binds `127.0.0.1` on the host. Do not change that to `37100:37100` or `0.0.0.0:37100:37100`, do not forward the port on the router, do not put it behind Web Station or a public reverse proxy, and do not use Tailscale Funnel. Reach it from the NAS itself, an SSH tunnel, or Tailscale Serve to loopback. See [ADR 0002](adr/0002-docker-loopback-publish.md) and [ADR 0003](adr/0003-ghcr-pull-not-nas-build.md).
 
@@ -15,10 +19,10 @@ Image: `ghcr.io/coke1120/grok-whatsapp-bridge`
 | `:vX.Y.Z` | GitHub Release published, or a `vX.Y.Z` tag push, or Actions **Publish GHCR image** with that tag. This is the pin. |
 | `:latest` | Same publish. Do not pin the NAS to `:latest`. |
 
-`docker-compose.yml` pins `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2` on `bridge`, `listener`, and `pair`. Change all three when you move the pin (the YAML anchor `bridge-image` is one value).
+`docker-compose.yml` pins `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.3` on `bridge`, `listener`, and `pair`. Change all three when you move the pin (the YAML anchor `bridge-image` is one value).
 
 ```bash
-docker pull ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2
+docker pull ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.3
 ```
 
 The repository is public. Anonymous pull is the normal path. You do not `docker login` on the NAS. GitHub sometimes creates the first package as private; the publish workflow asks for public visibility. If `docker pull` is denied, an owner sets the package to **Public** once on the package page. Do not put a registry token on the NAS. If the package is later made private, `docker login ghcr.io` needs a classic PAT with `read:packages`.
@@ -74,8 +78,10 @@ Default is `bridge`, the Compose DNS name the listener uses. A hardcoded `bridge
 
 Serve via MagicDNS can return **HTTP 400 Invalid Host** because the `Host` header is the tailnet name, not `127.0.0.1`. Add that name. Do not use Funnel. Do not add a public hostname.
 
+Primary Serve is the Mac mini. Its MagicDNS name is `leos-mac-mini.tail48056.ts.net`. Include `bridge` only when a Compose listener calls `http://bridge:37100`. The older NAS MagicDNS example was `leohofamily.tail48056.ts.net`. Copy the name of the host that actually terminates Serve.
+
 ```
-WHATSAPP_TRUSTED_HOSTS=bridge,leohofamily.tail48056.ts.net
+WHATSAPP_TRUSTED_HOSTS=bridge,leos-mac-mini.tail48056.ts.net
 ```
 
 ## Files
@@ -163,7 +169,7 @@ ssh -L 37100:127.0.0.1:37100 user@nas
 curl -sS http://127.0.0.1:37100/health
 ```
 
-**Tailscale Serve** (tailnet only), with the Tailscale package or container on the NAS:
+**Tailscale Serve** (tailnet only). Primary Serve runs on the Mac mini (`tailscale serve --bg 37100` → `https://leos-mac-mini.tail48056.ts.net/`). The commands below are the optional NAS path, with the Tailscale package or container on the NAS:
 
 ```bash
 sudo tailscale serve --bg 37100

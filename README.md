@@ -5,7 +5,7 @@ Marketplace plugin that ships the **whatsapp-bridge** agent skill plus the runna
 | Piece | What you get |
 |-------|----------------|
 | Plugin skill | `skills/whatsapp-bridge/SKILL.md` — when/how to pair, send, listen, wake |
-| Bridge runtime | `bridge.js` + `listener.mjs` — run on your always-on host (loopback / Tailscale only) |
+| Bridge runtime | `bridge.js` + `listener.mjs` — Primary: Mac mini, loopback + Tailscale Serve |
 
 **Install (after marketplace approval):** search Marketplace for `grok-whatsapp-bridge`, or install from this public GitHub repo.
 
@@ -33,25 +33,59 @@ The same paths exist under `/accounts/<name>/...`. A header `X-WhatsApp-Account:
 
 Default bind: `127.0.0.1:37100`.
 
-## Quick start
+## Primary ops: Mac mini + Tailscale Serve
 
-Needs Node 18+.
+Current ops run the bridge on the **Mac mini** (bare metal, Node 18+). It listens on loopback. **Tailscale Serve** publishes it to the tailnet only. Do not use Tailscale Funnel, and do not publish port 37100 on the public internet.
+
+Synology / NAS Docker stays in this repo as a documented **optional** capability. It is **not** current Primary ops. The NAS bridge has been cleaned and is not in use. Tutorial: [docs/docker-synology.md](docs/docker-synology.md).
+
+MagicDNS: `https://leos-mac-mini.tail48056.ts.net/`
+
+`GET /health` on that URL returns **HTTP 200** when the process is up. `status` is `connected` once WhatsApp is linked. HTTP 200 while the Mac is still showing a QR means the process is up and waiting for that scan.
+
+Serve sends `Host: leos-mac-mini.tail48056.ts.net`. Set that name or the bridge returns HTTP 400 Invalid Host. Do not add a public hostname.
+
+```
+WHATSAPP_TRUSTED_HOSTS=leos-mac-mini.tail48056.ts.net
+```
+
+On the Mac, call the API on localhost, including `POST /send`:
+
+```bash
+curl -sS http://127.0.0.1:37100/health
+curl -sS -X POST http://127.0.0.1:37100/send \
+  -H 'content-type: application/json' \
+  -d '{"chatId":"<jid>","message":"hi"}'
+```
+
+A remote box may try Serve with a client timeout of at most 3 seconds. The box does not start or run the bridge.
+
+```bash
+curl -sS --max-time 3 https://leos-mac-mini.tail48056.ts.net/health
+```
+
+Mac mini setup:
 
 ```bash
 cp .env.example .env
-# set WHATSAPP_ALLOWED_USERS to E.164 digits (no +), comma-separated
+# WHATSAPP_ALLOWED_USERS = E.164 digits (no +), comma-separated
+# WHATSAPP_TRUSTED_HOSTS=leos-mac-mini.tail48056.ts.net
 npm ci
 ./pair.sh              # scan QR: WhatsApp → Linked Devices
 ./start.sh             # keep running (tmux/systemd)
-curl -s http://127.0.0.1:37100/health
+curl -sS http://127.0.0.1:37100/health
+tailscale serve --bg 37100
+curl -sS --max-time 3 https://leos-mac-mini.tail48056.ts.net/health
 ./start-listener.sh    # optional: allowlist poll + inbox.jsonl + webhook
 ```
 
-## Docker (GHCR, Synology, Portainer)
+`tailscale serve --bg 37100` proxies tailnet HTTPS to `http://127.0.0.1:37100`. An older NAS MagicDNS example was `leohofamily.tail48056.ts.net`. Primary Serve is `leos-mac-mini.tail48056.ts.net`.
 
-`./start.sh`, `./pair.sh`, and `./start-listener.sh` stay the bare-metal path. `Dockerfile` is what GitHub Actions builds. `docker-compose.yml` only **pulls**.
+## Docker (optional / legacy: GHCR, Synology, Portainer)
 
-Image: `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.2` (and `:latest` on each publish). The repo is public, so `docker pull` does not need a login unless the package is later made private. Pin a tag. Do not attach image tarballs to GitHub Releases.
+Not Primary. `./start.sh`, `./pair.sh`, and `./start-listener.sh` stay the Mac mini / bare-metal path. `Dockerfile` is what GitHub Actions builds. `docker-compose.yml` only **pulls**.
+
+Image: `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.3` (and `:latest` on each publish). The repo is public, so `docker pull` does not need a login unless the package is later made private. Pin a tag. Do not attach image tarballs to GitHub Releases.
 
 **Never publish the bridge to the open internet.** Compose maps `127.0.0.1:37100` on the host only. Do not change that to `37100:37100`, do not forward the port, and do not use Tailscale Funnel. The HTTP API has no login. `curl` HTTP 200 on `/health` means the process is up, not that WhatsApp is linked. `curl` HTTPS 200 on `https://web.whatsapp.com` is not a working WebSocket (WSS).
 
@@ -67,13 +101,13 @@ curl -sS http://127.0.0.1:37100/health
 docker compose --profile listener up -d
 ```
 
-Portainer: set variables in the stack environment UI. Do not use a relative `env_file: .env`. `WHATSAPP_TRUSTED_HOSTS` defaults to `bridge` and can be extended from that UI or from `.env` (Tailscale Serve MagicDNS). Example: `bridge,leohofamily.tail48056.ts.net`.
+Portainer: set variables in the stack environment UI. Do not use a relative `env_file: .env`. `WHATSAPP_TRUSTED_HOSTS` defaults to `bridge` and can be extended from that UI or from `.env` (Tailscale Serve MagicDNS). Primary Serve name: `bridge,leos-mac-mini.tail48056.ts.net`. The older NAS example was `bridge,leohofamily.tail48056.ts.net`.
 
 If Compose bridge DNS/egress dies (`EAI_AGAIN` for `web.whatsapp.com` inside the container, no QR, close 408) while the NAS host can resolve WhatsApp, use `docker-compose.host-net.yml`: host network and `WHATSAPP_BIND_HOST=127.0.0.1`. That file is not the default. Do not bind `0.0.0.0` on the host network.
 
 WhatsApp → Linked devices may still show **Google Chrome (Hermes Agent)** until an image that contains the rename is running, and usually until the next link. Do not re-pair a working session only to change that label. Image `:v1.3.2` (git tag `v1.3.2`) contains the rename. Image `:v1.3.1` built from git tag `v1.3.1` does not.
 
-Full steps (Container Manager, pull vs build, Tailscale / SSH, host network, one-shot pair, upgrade without wiping `session/`): [docs/docker-synology.md](docs/docker-synology.md).
+Optional / legacy NAS tutorial (Container Manager, pull vs build, Tailscale / SSH, host network, one-shot pair, upgrade without wiping `session/`): [docs/docker-synology.md](docs/docker-synology.md). That page is not the Primary path.
 
 ## Token model
 
