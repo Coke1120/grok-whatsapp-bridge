@@ -34,7 +34,7 @@ test('MCP sends only with explicit allowlist and send switch', async () => {
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'http://127.0.0.1:37100/send');
   assert.equal(JSON.parse(calls[0].options.body).chatId, JID);
-  await assert.rejects(tools.invoke('whatsapp_send_message', { chatId: '123@s.whatsapp.net', message: 'oops' }), /allowlist/);
+  await assert.rejects(tools.invoke('whatsapp_send_message', { chatId: '123@s.whatsapp.net', message: 'oops' }), /WHATSAPP_MCP_ALLOWED_CHATS/);
   await assert.rejects(createWhatsAppTools({
     env: { ...BASE_ENV, WHATSAPP_MCP_SEND_ENABLED: '0' }, fetchImpl,
   }).invoke('whatsapp_send_message', { chatId: JID, message: 'no' }), /disabled/);
