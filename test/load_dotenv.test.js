@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 test('load_dotenv.py exports quoted values and skips comments', () => {
@@ -15,7 +16,8 @@ test('load_dotenv.py exports quoted values and skips comments', () => {
     'WHATSAPP_WAKE_WEBHOOK_AUTH="Bearer abc def"',
     "WHATSAPP_ACCOUNTS='[{\"name\":\"ops\"}]'",
   ].join('\n'));
-  const result = spawnSync('python3', ['load_dotenv.py', file], { cwd: '/workspace', encoding: 'utf8' });
+  const projectRoot = fileURLToPath(new URL('../', import.meta.url));
+  const result = spawnSync('python3', ['load_dotenv.py', file], { cwd: projectRoot, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /export WHATSAPP_BRIDGE_PORT=37100/);
   assert.match(result.stdout, /export WHATSAPP_WAKE_WEBHOOK_AUTH='Bearer abc def'/);
