@@ -1,4 +1,8 @@
-# grok-whatsapp-bridge (Grok Bot / Cursor plugin)
+# WhatsApp Agent Bridge (Grok Bot / OpenMausBot / Hermes)
+
+**WhatsApp Agent Bridge** is the general-purpose name for the existing Baileys bridge; the repository URL and GHCR image remain `grok-whatsapp-bridge` for backward compatibility.
+
+**OpenMausBot on Mac mini:** [Install the local MCP adapter and optional WhatsApp webhook automation](docs/openmausbot.md). The adapter reuses the current paired WhatsApp session and never drains the bridge's inbound queue.
 
 Marketplace plugin that ships the **whatsapp-bridge** agent skill plus the runnable Baileys HTTP bridge sources in this repo.
 
