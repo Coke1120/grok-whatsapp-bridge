@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { Boom } from '@hapi/boom';
-import { DisconnectReason } from '@whiskeysockets/baileys';
+import { DisconnectReason, generateRegistrationNode, proto } from '@whiskeysockets/baileys';
 import { DEFAULT_REPLY_PREFIX } from '../accounts_config.js';
 import { createAccountRuntime } from '../account_runtime.js';
 import { PRE_QR_EGRESS_HINT } from '../bridge_helpers.js';
 
-test('linked device browser name is Grok WhatsApp Bridge', () => {
+test('linked device browser name is WhatsApp Bridge', () => {
   const src = readFileSync(new URL('../account_runtime.js', import.meta.url), 'utf8');
-  assert.match(src, /browser: \['Grok WhatsApp Bridge', 'Chrome', '120\.0'\]/);
+  assert.match(src, /browser: \['WhatsApp Bridge', 'Chrome', '120\.0'\]/);
   assert.equal(src.includes('Hermes'), false);
 });
 
@@ -124,8 +124,9 @@ function harness(dir, overrides = {}) {
         authDirs.push(sessionDir);
         return { state: { creds: {} }, saveCreds() {} };
       },
-      makeWASocket() {
+      makeWASocket(options) {
         const fake = createFakeSocket();
+        fake.options = options;
         sockets.push(fake);
         return fake.sock;
       },
@@ -510,4 +511,26 @@ test('pair-only exits after connect and exits when the first connect fails', asy
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test('linked-device pairing advertises Chrome with WhatsApp Bridge companion name', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-browser-'));
+  try {
+    const handle = harness(dir);
+    await handle.runtime.start();
+    await handle.clock.flush();
+    const config = handle.sockets[0].options;
+    assert.deepEqual(config.browser, ['WhatsApp Bridge', 'Chrome', '120.0']);
+    const zero = new Uint8Array(32);
+    const registration = generateRegistrationNode({
+      registrationId: 1,
+      signedPreKey: { keyId: 1, keyPair: { public: zero }, signature: new Uint8Array(64) },
+      signedIdentityKey: { public: zero },
+    }, config);
+    const device = proto.DeviceProps.decode(registration.devicePairingData.deviceProps);
+    assert.equal(device.os, 'WhatsApp Bridge');
+    assert.equal(device.platformType, proto.DeviceProps.PlatformType.CHROME);
+    await handle.runtime.pause();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

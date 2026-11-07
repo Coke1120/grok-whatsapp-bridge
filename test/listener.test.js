@@ -104,7 +104,7 @@ test('single-account listener keeps the historical poll, inbox row, and webhook'
     assert.equal(wake.length, 1);
     assert.equal(wake[0].options.headers.Authorization, 'Bearer secret-token');
     const payload = JSON.parse(wake[0].options.body);
-    assert.deepEqual(Object.keys(payload), ['source', 'chatId', 'senderId', 'senderName', 'body', 'hasMedia', 'ts']);
+    assert.deepEqual(Object.keys(payload), ['source', 'messageId', 'deliveryId', 'chatId', 'senderId', 'senderName', 'body', 'hasMedia', 'ts']);
     assert.equal(payload.source, 'whatsapp-bridge-listener');
     assert.equal(payload.body, 'hello');
     assert.equal(calls.some((call) => call.url.endsWith('/accounts/')), false);
@@ -112,7 +112,7 @@ test('single-account listener keeps the historical poll, inbox row, and webhook'
 
     const rows = readFileSync(path.join(dir, 'inbox.jsonl'), 'utf8').trim().split('\n').map((line) => JSON.parse(line));
     assert.equal(rows.length, 1);
-    assert.deepEqual(Object.keys(rows[0]), ['ts', 'allowed', 'chatId', 'senderId', 'senderName', 'body', 'hasMedia']);
+    assert.deepEqual(Object.keys(rows[0]), ['ts', 'messageId', 'deliveryId', 'allowed', 'chatId', 'senderId', 'senderName', 'body', 'hasMedia']);
     assert.equal(rows[0].allowed, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -196,8 +196,11 @@ test('multi-account listener polls, wakes, and acks each account separately', as
     assert.deepEqual(rows.map((row) => row.account), ['ops', 'sales']);
     assert.equal(rows[1].allowed, true);
     const state = JSON.parse(readFileSync(path.join(dir, 'listener-state.json'), 'utf8'));
-    assert.ok(state.seen.includes('ops:same'));
-    assert.ok(state.seen.includes('sales:same'));
+    assert.equal(state.seen.length, 2);
+    assert.notEqual(state.seen[0], state.seen[1]);
+    assert.equal(rows[0].messageId, 'same');
+    assert.equal(rows[1].messageId, 'same');
+    assert.notEqual(rows[0].deliveryId, rows[1].deliveryId);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
