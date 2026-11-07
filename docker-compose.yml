@@ -27,6 +27,9 @@ x-app-env: &app-env
   WHATSAPP_SESSION_DIR: /app/session
   HOME: /home/node
   WHATSAPP_ALLOWED_USERS: ${WHATSAPP_ALLOWED_USERS:-}
+  # Optional independent account-scoped read / wake / send ceilings. Empty is
+  # legacy compatibility; explicit JSON {} denies all accounts.
+  WHATSAPP_SCOPES: ${WHATSAPP_SCOPES:-}
   WHATSAPP_GROUP_ALLOWED_USERS: ${WHATSAPP_GROUP_ALLOWED_USERS:-}
   WHATSAPP_MODE: ${WHATSAPP_MODE:-bot}
   WHATSAPP_DM_POLICY: ${WHATSAPP_DM_POLICY:-}

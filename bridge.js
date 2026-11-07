@@ -98,6 +98,7 @@ function runtimeFor(account, shared) {
     replyPrefix: account.replyPrefix,
     forwardOwnerMessages: account.forwardOwnerMessages,
     sendReadReceipts: account.sendReadReceipts,
+    accessScope: account.accessScope,
     maxMessageLength: parseInt(process.env.WHATSAPP_MAX_MESSAGE_LENGTH || '4096', 10),
     chunkDelayMs: parseInt(process.env.WHATSAPP_CHUNK_DELAY_MS || '300', 10),
     sendTimeoutMs: parseInt(process.env.WHATSAPP_SEND_TIMEOUT_MS || '60000', 10),

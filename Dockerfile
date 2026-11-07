@@ -35,7 +35,7 @@ LABEL org.opencontainers.image.source="https://github.com/Coke1120/grok-whatsapp
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
-COPY account_http.js account_runtime.js accounts_config.js allowlist.js \
+COPY access_scopes.js account_http.js account_runtime.js accounts_config.js allowlist.js \
      bridge.js bridge_helpers.js bridge_startup.js listener.mjs listener_delivery.mjs \
      outbound_ids.js owner_message_gate.js ./
 COPY accounts ./accounts

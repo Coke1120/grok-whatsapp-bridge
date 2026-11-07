@@ -19,6 +19,7 @@ import qrcode from 'qrcode-terminal';
 import { matchesAllowedSender, matchesAllowedUser, matchesInboundWhatsAppGroup, parseAllowedUsers } from './allowlist.js';
 import { createOutboundIdTracker } from './outbound_ids.js';
 import { classifyOwnerMessageGate } from './owner_message_gate.js';
+import { canReadChat, canSendChat } from './access_scopes.js';
 import {
   addMentions,
   buildPollPayload,
@@ -74,6 +75,7 @@ export function createAccountRuntime(options) {
     replyPrefix = '',
     forwardOwnerMessages = false,
     sendReadReceipts = false,
+    accessScope = null,
     maxMessageLength = 4096,
     chunkDelayMs = 300,
     sendTimeoutMs = 60000,
@@ -102,6 +104,12 @@ export function createAccountRuntime(options) {
 
   const allowedUsers = parseAllowedUsers(allowedUsersRaw);
   const groupAllowedUsers = parseAllowedUsers(groupAllowedUsersRaw);
+
+  function canReadScopedChat(chatId) {
+    return canReadChat(accessScope, chatId) && (!chatId.endsWith('@g.us') || matchesInboundWhatsAppGroup({
+      chatId, groupPolicy, groupAllowedUsers, sessionDir,
+    }));
+  }
 
   function log(text) {
     writeLog(multi ? `[${name}] ${text}` : text);
@@ -152,12 +160,21 @@ export function createAccountRuntime(options) {
   }
 
   function pushEvent(event) {
+    if (accessScope !== null) {
+      if (!canReadScopedChat(event.chatId)) return;
+      event.scopeVersion = 1;
+      event.eventType = event.mediaType === 'poll_update' ? 'poll_update' : 'message';
+      event.fromOwner = event.fromOwner === true;
+    }
     if (multi) event.account = name;
     messageQueue.push(event);
     if (messageQueue.length > MAX_QUEUE_SIZE) messageQueue.shift();
   }
 
   function sendWithTimeout(chatId, payload, sendOptions = {}, timeoutMs = sendTimeoutMs) {
+    if (accessScope !== null && !canSendChat(accessScope, chatId)) {
+      return Promise.reject(Object.assign(new Error('Destination is outside this account send scope.'), { status: 403 }));
+    }
     let timer;
     const timeoutPromise = new Promise((_, reject) => {
       timer = setTimeout(
@@ -196,8 +213,11 @@ export function createAccountRuntime(options) {
     return chunks;
   }
 
-  function rememberSentMessage(sent, payload) {
+  function rememberSentMessage(sent, payload, chatId) {
     if (!sent?.key?.id) return;
+    // Keep the known destination even when a transport response omits it, so
+    // later poll aggregation cannot treat an ID as cross-chat authority.
+    if (accessScope !== null && !sent.key.remoteJid) sent = { ...sent, key: { ...sent.key, remoteJid: chatId } };
     if (sent.message) {
       messageStore.remember(sent);
       return;
@@ -218,6 +238,11 @@ export function createAccountRuntime(options) {
     return { status: 503, body: { error } };
   }
 
+  function denySend(chatId) {
+    return accessScope !== null && !canSendChat(accessScope, chatId)
+      ? { status: 403, body: { error: 'Destination is outside this account send scope.' } } : null;
+  }
+
   function normalizePollUpdateOptions(aggregation, pollUpdateMessage) {
     const selected = [];
     for (const option of aggregation || []) {
@@ -232,9 +257,16 @@ export function createAccountRuntime(options) {
 
   function pollAggregationSummary(aggregation) {
     return (aggregation || []).map((option) => ({
-      name: option?.name || '',
+      ...(accessScope === null ? { name: option?.name || '' } : {}),
       voterCount: (option?.voters || []).length,
     }));
+  }
+
+  function pollKeysAgree(chatId, keys, cachedPoll) {
+    if (accessScope === null) return true;
+    if (!canReadScopedChat(chatId)) return false;
+    if (keys.some((key) => key?.remoteJid && normalizeWhatsAppId(key.remoteJid) !== chatId)) return false;
+    return !cachedPoll || normalizeWhatsAppId(cachedPoll.key?.remoteJid || '') === chatId;
   }
 
   function logPollUpdateDiagnostic({ sourcePath, pollId, pollCreation, pollUpdates, selectedOptions, aggregation }) {
@@ -371,8 +403,15 @@ export function createAccountRuntime(options) {
       for (const { key, update } of updates || []) {
         if (sock !== created) return;
         if (!update?.pollUpdates) continue;
+        // Poll-update events take a separate path from messages.upsert. Apply
+        // the same read ceiling before aggregation, diagnostic logs or cache.
+        const pollChat = normalizeWhatsAppId(key?.remoteJid || update.pollUpdates?.[0]?.pollUpdateMessageKey?.remoteJid || '');
+        if (accessScope !== null && !canReadScopedChat(pollChat)) continue;
+        const nestedKeys = update.pollUpdates.flatMap((p) => [p.pollCreationMessageKey, p.pollUpdateMessageKey]);
+        if (!pollKeysAgree(pollChat, [key, ...nestedKeys])) continue;
         const pollCreationId = key?.id || update.pollUpdates?.[0]?.pollCreationMessageKey?.id;
         const pollCreation = messageStore.get(pollCreationId);
+        if (!pollKeysAgree(pollChat, [], pollCreation)) continue;
         let aggregation = [];
         let pollUpdates = update.pollUpdates;
         try {
@@ -437,6 +476,9 @@ export function createAccountRuntime(options) {
         const senderAltId = normalizeWhatsAppId(msg.key.participantAlt || msg.key.remoteJidAlt || '');
         const resolvedSenderId = senderAltId.endsWith('@s.whatsapp.net') ? senderAltId : senderId;
         const isGroup = chatId.endsWith('@g.us');
+        // Reading is independent from wake/send permission. Reject before
+        // downloading media or extracting quoted content from denied chats.
+        if (accessScope !== null && !canReadScopedChat(chatId)) continue;
         const senderNumber = resolvedSenderId.replace(/@.*/, '');
         emitDebugEvent({
           stage: 'upsert',
@@ -463,7 +505,8 @@ export function createAccountRuntime(options) {
               fromMe: true,
               fromOwnerEnabled: forwardOwnerMessages,
               recentlySent: recentlySentIds,
-              allowlistMatches: (id) => matchesAllowedUser(id, allowedUsers, sessionDir),
+              allowlistMatches: (id) => accessScope !== null
+                ? canReadScopedChat(id) : matchesAllowedUser(id, allowedUsers, sessionDir),
               messageId: msg.key.id,
               chatId,
             });
@@ -519,7 +562,9 @@ export function createAccountRuntime(options) {
             } catch {}
             continue;
           }
-          const intakeAllowed = isGroup
+          const intakeAllowed = accessScope !== null ? (!isGroup || matchesInboundWhatsAppGroup({
+            chatId, groupPolicy, groupAllowedUsers, sessionDir,
+          })) : isGroup
             ? matchesInboundWhatsAppGroup({
               chatId,
               groupPolicy,
@@ -551,7 +596,9 @@ export function createAccountRuntime(options) {
             remoteJid: chatId,
             participant: senderId,
           };
+          if (!pollKeysAgree(chatId, [pollKey, pollUpdateMessage.key, pollUpdateMessage.pollUpdateMessageKey])) continue;
           const pollCreation = messageStore.get(pollKey.id);
+          if (!pollKeysAgree(chatId, [], pollCreation)) continue;
           let aggregation = [];
           let pollUpdates = [pollUpdateMessage];
           try {
@@ -610,7 +657,9 @@ export function createAccountRuntime(options) {
           senderNumber,
           botIds,
           isGroup,
-          downloadMedia: async (mediaMsg) => downloadMedia(mediaMsg, 'buffer', {}, {
+          // Scoped reading exposes text/metadata, not automatic attachment
+          // downloads or host-file paths. The legacy mode remains unchanged.
+          downloadMedia: accessScope !== null ? undefined : async (mediaMsg) => downloadMedia(mediaMsg, 'buffer', {}, {
             logger,
             reuploadRequest: created.updateMediaMessage,
           }),
@@ -622,7 +671,7 @@ export function createAccountRuntime(options) {
           lookupQuotedMedia: (quotedChatId, quotedMessageId) => quotedMediaCache.get(quotedChatId, quotedMessageId),
         });
         if (sock !== created) return;
-        event.fromOwner = fromOwner;
+        event.fromOwner = accessScope !== null ? (fromOwner || !!msg.key.fromMe) : fromOwner;
 
         if (msg.key.fromMe && ((replyPrefix && event.body.startsWith(replyPrefix)) || recentlySentIds.has(msg.key.id))) {
           if (debug) {
@@ -776,6 +825,7 @@ export function createAccountRuntime(options) {
       mode,
       sendReadReceipts: !!sendReadReceipts,
       linkedUser: redactWhatsAppId(sock?.user?.id || ''),
+      ...(accessScope !== null ? { independentScopes: true } : {}),
     };
   }
 
@@ -784,6 +834,7 @@ export function createAccountRuntime(options) {
   }
 
   async function send(body) {
+    const denied = denySend(body?.chatId); if (denied) return denied;
     if (!sock || connectionState !== 'connected') return notConnected('Not connected to WhatsApp');
     const { chatId, message, replyTo, mentions } = body || {};
     if (!chatId || !message) {
@@ -815,6 +866,7 @@ export function createAccountRuntime(options) {
   }
 
   async function edit(body) {
+    const denied = denySend(body?.chatId); if (denied) return denied;
     if (!sock || connectionState !== 'connected') return notConnected('Not connected to WhatsApp');
     const { chatId, messageId, message } = body || {};
     if (!chatId || !messageId || !message) {
@@ -840,6 +892,7 @@ export function createAccountRuntime(options) {
   }
 
   async function sendMedia(body) {
+    const denied = denySend(body?.chatId); if (denied) return denied;
     if (!sock || connectionState !== 'connected') return notConnected('Not connected to WhatsApp');
     const { chatId, filePath, mediaType, caption, fileName, mentions } = body || {};
     if (!chatId || !filePath) {
@@ -926,6 +979,7 @@ export function createAccountRuntime(options) {
   }
 
   async function sendPoll(body) {
+    const denied = denySend(body?.chatId); if (denied) return denied;
     if (!sock || connectionState !== 'connected') return notConnected('Not connected to WhatsApp');
     const { chatId, question, options: pollOptions, selectableCount } = body || {};
     if (!chatId || !question || !Array.isArray(pollOptions)) {
@@ -935,7 +989,7 @@ export function createAccountRuntime(options) {
       const payload = buildPollPayload({ question, options: pollOptions, selectableCount });
       const sent = await sendWithTimeout(chatId, payload);
       trackSentMessageId(sent);
-      rememberSentMessage(sent, payload);
+      rememberSentMessage(sent, payload, chatId);
       return { status: 200, body: { success: true, messageId: sent?.key?.id } };
     } catch (err) {
       return { status: 400, body: { error: err.message } };
@@ -943,6 +997,7 @@ export function createAccountRuntime(options) {
   }
 
   async function sendLocation(body) {
+    const denied = denySend(body?.chatId); if (denied) return denied;
     if (!sock || connectionState !== 'connected') return notConnected('Not connected to WhatsApp');
     const { chatId, latitude, longitude, name: placeName, address } = body || {};
     if (!chatId || latitude === undefined || longitude === undefined) {
@@ -960,6 +1015,7 @@ export function createAccountRuntime(options) {
   }
 
   async function typing(body) {
+    const denied = denySend(body?.chatId); if (denied) return denied;
     if (!sock || connectionState !== 'connected') return notConnected('Not connected');
     const { chatId } = body || {};
     if (!chatId) return { status: 400, body: { error: 'chatId required' } };
@@ -972,6 +1028,7 @@ export function createAccountRuntime(options) {
   }
 
   async function markRead(body) {
+    const denied = denySend(body?.key?.remoteJid); if (denied) return denied;
     if (!sock || connectionState !== 'connected') return notConnected('Not connected');
     const receiptKeys = inboundReadReceiptKeys({
       key: body?.key,
@@ -988,6 +1045,9 @@ export function createAccountRuntime(options) {
   }
 
   async function chatInfo(chatId) {
+    if (accessScope !== null && !canReadScopedChat(chatId)) {
+      return { status: 403, body: { error: 'Chat is outside this account read scope.' } };
+    }
     const isGroup = String(chatId || '').endsWith('@g.us');
     if (isGroup && sock) {
       try {

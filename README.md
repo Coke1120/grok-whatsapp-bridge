@@ -157,6 +157,19 @@ curl -sS -X POST http://127.0.0.1:37100/accounts/sales/send \
 
 Per-account `allowedUsers` overrides `WHATSAPP_ALLOWED_USERS` for that number. The allowlist is still not the list of accounts.
 
+## Independent read, trigger and send permissions
+
+An optional `WHATSAPP_SCOPES` JSON policy separates the conversations an agent
+can read, the private conversations that may wake it, and its outbound destinations.
+For example, reading new DMs from all contacts does **not** grant permission to
+reply to those contacts. Exact account + chat gates also apply inside the bridge
+runtime, so calling the local REST send routes does not bypass a configured send
+ceiling. Unset/empty keeps legacy behavior; explicit `{}` denies all accounts.
+
+This feature is opt-in and does not authorize broader account access by itself.
+See [configuration, migration and limits](docs/access-scopes.md). The local REST
+API is still unauthenticated and must stay on host loopback.
+
 ## Environment
 
 See `.env.example`. Important:

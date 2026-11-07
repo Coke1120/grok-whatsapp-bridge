@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import path from 'path';
+import { parseAccessScopes, scopeForAccount } from './access_scopes.js';
 
 export const DEFAULT_REPLY_PREFIX = '☤ *Grok WhatsApp Bridge*\n────────────\n';
 
@@ -83,6 +84,7 @@ function normalizeAccount(raw, env, cli) {
     programmaticAck: optionalString(raw, 'programmaticAck'),
     wakeWebhookUrl: optionalString(raw, 'wakeWebhookUrl'),
     wakeWebhookAuth: optionalString(raw, 'wakeWebhookAuth'),
+    accessScope: scopeForAccount(parseAccessScopes(env.WHATSAPP_SCOPES), name),
   };
 }
 
