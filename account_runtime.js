@@ -686,7 +686,7 @@ export function createAccountRuntime(options) {
       auth: state,
       logger,
       printQRInTerminal: false,
-      browser: ['Grok WhatsApp Bridge', 'Chrome', '120.0'],
+      browser: ['WhatsApp Bridge', 'Chrome', '120.0'],
       syncFullHistory: false,
       markOnlineOnConnect: false,
       getMessage: async () => ({ conversation: '' }),

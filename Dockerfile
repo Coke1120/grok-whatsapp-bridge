@@ -36,10 +36,11 @@ LABEL org.opencontainers.image.source="https://github.com/Coke1120/grok-whatsapp
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
 COPY account_http.js account_runtime.js accounts_config.js allowlist.js \
-     bridge.js bridge_helpers.js bridge_startup.js listener.mjs \
+     bridge.js bridge_helpers.js bridge_startup.js listener.mjs listener_delivery.mjs \
      outbound_ids.js owner_message_gate.js ./
 COPY accounts ./accounts
 COPY accounts.example.json ./
+COPY mcp ./mcp
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh \
     && command -v setpriv >/dev/null \

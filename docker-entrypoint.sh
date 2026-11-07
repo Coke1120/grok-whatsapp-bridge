@@ -1,5 +1,6 @@
 #!/bin/sh
-# Fix volume ownership as root, drop to the node user, then start bridge / listener / pair.
+# Fix writable service volumes as root, then drop to node. MCP never prepares
+# volumes and writes only JSON-RPC on stdout (including during startup).
 # Bare-metal ./start.sh and ./pair.sh do not use this script.
 set -eu
 umask 077
@@ -8,6 +9,15 @@ cd /app
 port="${WHATSAPP_BRIDGE_PORT:-37100}"
 session="${WHATSAPP_SESSION_DIR:-/app/session}"
 mode="${WHATSAPP_MODE:-bot}"
+
+if [ "$#" -eq 0 ]; then
+  set -- bridge
+fi
+# The pair service accepts an account name as its replacement command. Keep an
+# existing account literally named "mcp" on the pairing path, not stdio.
+if [ "${WHATSAPP_DOCKER_ROLE:-}" = "pair" ] && [ "$1" = "mcp" ]; then
+  set -- pair "$@"
+fi
 
 prepare_data_dirs() {
   mkdir -p /app/session /app/sessions /app/listener-data
@@ -26,17 +36,23 @@ if [ "$(id -u)" = "0" ]; then
     echo "setpriv is missing; cannot drop root." >&2
     exit 1
   fi
-  prepare_data_dirs
+  # MCP only needs a read-only inbox. It must not chown/chmod that volume or
+  # require access to any WhatsApp session directory.
+  if [ "$1" != "mcp" ]; then
+    prepare_data_dirs
+  fi
   export HOME=/home/node
   exec setpriv --reuid=node --regid=node --init-groups --inh-caps=-all "$0" "$@"
 fi
 
 export HOME="${HOME:-/home/node}"
-for dir in /app/session /app/sessions /app/listener-data; do
-  if [ ! -d "$dir" ] || [ ! -w "$dir" ]; then
-    echo "warning: ${dir} is not writable by $(id -un). Start the container as root so the entrypoint can chown session volumes to node (uid $(id -u node 2>/dev/null || echo 1000))." >&2
-  fi
-done
+if [ "$1" != "mcp" ]; then
+  for dir in /app/session /app/sessions /app/listener-data; do
+    if [ ! -d "$dir" ] || [ ! -w "$dir" ]; then
+      echo "warning: ${dir} is not writable by $(id -un). Start the container as root so the entrypoint can chown session volumes to node (uid $(id -u node 2>/dev/null || echo 1000))." >&2
+    fi
+  done
+fi
 
 is_multi() {
   if [ -n "${WHATSAPP_ACCOUNTS:-}" ]; then
@@ -124,11 +140,13 @@ run_pair() {
   exec node bridge.js --port "$port" --session "$session" --mode "$mode" --pair-only
 }
 
-if [ "$#" -eq 0 ]; then
-  set -- bridge
-fi
-
 case "$1" in
+  mcp)
+    shift
+    export WHATSAPP_BRIDGE_URL="${WHATSAPP_BRIDGE_URL:-http://127.0.0.1:${port}}"
+    export WHATSAPP_INBOX_PATH="${WHATSAPP_INBOX_PATH:-/app/listener-data/inbox.jsonl}"
+    exec node mcp/server.mjs "$@"
+    ;;
   bridge)
     shift
     if is_multi; then

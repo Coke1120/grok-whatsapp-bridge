@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -151,3 +152,184 @@ test('Dockerfile is a Node 22 multi-stage image that healthchecks /health', () =
   assert.match(docker, /ENTRYPOINT \["\/usr\/local\/bin\/docker-entrypoint\.sh"\]/);
   assert.match(docker, /CMD \["bridge"\]/);
 });
+
+test('Docker image includes MCP and the durable listener delivery helper', () => {
+  const docker = read('Dockerfile');
+  assert.match(docker, /^COPY mcp \.\/mcp$/m);
+  assert.match(docker, /listener\.mjs listener_delivery\.mjs/);
+});
+
+test('MCP overlay builds current source and confines stdio without session access', () => {
+  const result = spawnSync('python3', ['-c', `
+import yaml
+with open("docker-compose.yml") as fh:
+    base = yaml.safe_load(fh)
+with open("docker-compose.mcp.yml") as fh:
+    overlay = yaml.safe_load(fh)
+services = overlay["services"]
+for role in ["bridge", "listener", "pair", "mcp"]:
+    service = services[role]
+    assert service["build"] == ".", (role, service)
+    assert service["image"] == "grok-whatsapp-bridge:mcp-local", role
+    assert service["image"] != base["services"]["bridge"]["image"], role
+    assert service["pull_policy"] == "never", role
+mcp = services["mcp"]
+assert mcp["profiles"] == ["mcp"]
+assert mcp["command"] == ["mcp"]
+assert mcp["stdin_open"] is True
+assert mcp["tty"] is False
+assert mcp["user"] == "node"
+assert mcp["read_only"] is True
+assert mcp["cap_drop"] == ["ALL"]
+assert mcp["security_opt"] == ["no-new-privileges:true"]
+assert mcp["restart"] == "no"
+assert mcp["network_mode"] == "service:bridge"
+assert mcp["depends_on"] == {"bridge": {"condition": "service_healthy"}}
+assert "ports" not in mcp and "expose" not in mcp
+assert not any(key in mcp for key in ["privileged", "devices", "env_file", "pid"])
+assert mcp["volumes"] == [{
+    "type": "volume", "source": "wa-listener", "target": "/app/listener-data", "read_only": True,
+}]
+env = mcp["environment"]
+assert env["WHATSAPP_BRIDGE_URL"] == "http://127.0.0.1:\${WHATSAPP_BRIDGE_PORT:-37100}"
+assert env["WHATSAPP_INBOX_PATH"] == "/app/listener-data/inbox.jsonl"
+assert env["WHATSAPP_MCP_ALLOWED_CHATS"] == "\${WHATSAPP_MCP_ALLOWED_CHATS:-}"
+assert env["WHATSAPP_MCP_SEND_ENABLED"] == "\${WHATSAPP_MCP_SEND_ENABLED:-0}"
+assert env["WHATSAPP_MCP_ALLOW_GROUPS"] == "\${WHATSAPP_MCP_ALLOW_GROUPS:-0}"
+assert env["WHATSAPP_MCP_ALLOW_REMOTE"] == "0"
+assert set(env) == {
+    "HOME", "WHATSAPP_BRIDGE_URL", "WHATSAPP_INBOX_PATH", "WHATSAPP_MCP_ALLOWED_CHATS",
+    "WHATSAPP_MCP_SEND_ENABLED", "WHATSAPP_MCP_ALLOW_GROUPS", "WHATSAPP_MCP_ALLOW_REMOTE",
+}
+assert mcp["healthcheck"] == {"disable": True}
+assert mcp["logging"] == {"driver": "none"}
+print("ok")
+`], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+test('Compose passes opt-in listener delivery retry configuration', () => {
+  const compose = read('docker-compose.yml');
+  assert.match(compose, /WHATSAPP_WAKE_RETRY_ENABLED: \$\{WHATSAPP_WAKE_RETRY_ENABLED:-0\}/);
+  assert.match(compose, /WHATSAPP_WAKE_TIMEOUT_MS: \$\{WHATSAPP_WAKE_TIMEOUT_MS:-5000\}/);
+  assert.match(compose, /WHATSAPP_WAKE_MAX_ATTEMPTS: \$\{WHATSAPP_WAKE_MAX_ATTEMPTS:-5\}/);
+});
+
+test('PR CI builds both architectures and runs bounded, isolated MCP containers without publishing', () => {
+  const result = spawnSync('python3', ['-c', `
+import ast, subprocess, yaml
+with open(".github/workflows/test.yml") as fh:
+    workflow = yaml.safe_load(fh)
+triggers = workflow.get("on", workflow.get(True))
+assert triggers == {"pull_request": {"branches": ["dev", "main"]}, "push": {"branches": ["dev"]}}
+assert workflow["permissions"] == {"contents": "read"}
+job = workflow["jobs"]["docker-mcp"]
+assert job["if"] == "github.event_name == 'pull_request'"
+assert job["needs"] == "node" and job["timeout-minutes"] <= 35
+assert job["strategy"]["matrix"]["include"] == [
+    {"platform": "linux/amd64", "node_arch": "x64"}, {"platform": "linux/arm64", "node_arch": "arm64"},
+]
+steps = job["steps"]
+assert any(s.get("uses", "").startswith("docker/setup-qemu-action@") for s in steps)
+assert any(s.get("uses", "").startswith("docker/setup-buildx-action@") for s in steps)
+build = next(s["with"] for s in steps if s.get("uses", "").startswith("docker/build-push-action@"))
+assert build["push"] is False and build["load"] is True
+assert not any("login-action" in s.get("uses", "") for s in steps)
+config = next(s["run"] for s in steps if s.get("name") == "Validate merged MCP configuration")
+assert all("--profile " + profile in config for profile in ["mcp", "listener", "pair"])
+smoke = next(s for s in steps if s.get("name") == "Run isolated, non-root, read-only stdio smoke")
+assert smoke["timeout-minutes"] <= 3
+for step in steps:
+    if "run" not in step:
+        continue
+    result = subprocess.run(["bash", "-n"], input=step["run"], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    if "<<'PY'\\n" in step["run"]:
+        body = step["run"].split("<<'PY'\\n", 1)[1].rsplit("\\nPY", 1)[0]
+        tree = ast.parse(body)
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "guard" for t in node.targets):
+                result = subprocess.run(["node", "--check"], input=ast.literal_eval(node.value), text=True, capture_output=True)
+                assert result.returncode == 0, result.stderr
+for flag in ["--network", "--read-only", "--user", "--cap-drop", "--no-healthcheck"]:
+    assert flag in smoke["run"], flag
+assert '"none"' in smoke["run"] and '"node"' in smoke["run"]
+assert '"WHATSAPP_MCP_SEND_ENABLED=0"' in smoke["run"]
+assert 'timeout=60' in smoke["run"]
+print("ok")
+`], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+// Docker is not required for these executable entrypoint tests. Only identity,
+// setpriv and the /app working directory are substituted; the real MCP server
+// and Node stdio are exercised. Real container hardening is checked separately.
+for (const uid of ['0', '1000']) {
+  test(`MCP entrypoint is protocol-only and never prepares data directories (uid ${uid})`, () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'whatsapp-docker-mcp-'));
+    try {
+      const bin = path.join(dir, 'bin');
+      mkdirSync(bin);
+      const script = path.join(dir, 'entrypoint.sh');
+      writeFileSync(script, read('docker-entrypoint.sh').replace('cd /app\n', `cd '${dir}'\n`), { mode: 0o755 });
+      symlinkSync(path.join(root, 'mcp'), path.join(dir, 'mcp'), 'dir');
+      symlinkSync(process.execPath, path.join(bin, 'node'));
+      writeFileSync(path.join(bin, 'id'), `#!/bin/sh
+case "$1" in
+  -u) printf '%s\\n' "$MOCK_UID" ;;
+  -un) printf 'node\\n' ;;
+  *) exit 0 ;;
+esac
+`, { mode: 0o755 });
+      writeFileSync(path.join(bin, 'setpriv'), `#!/bin/sh
+printf '%s\\n' "$@" > "$MCP_TEST_PRIV_LOG"
+while [ "\${1#--}" != "$1" ]; do shift; done
+export MOCK_UID=1000
+exec "$@"
+`, { mode: 0o755 });
+      for (const command of ['mkdir', 'chown', 'chmod', 'find']) {
+        writeFileSync(path.join(bin, command), `#!/bin/sh
+echo 'MCP must not prepare data directories: ${command}' >&2
+exit 91
+`, { mode: 0o755 });
+      }
+      const log = path.join(dir, 'privileges.log');
+      const input = [
+        { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 2, method: 'ping' },
+        { jsonrpc: '2.0', id: 3, method: 'tools/list' },
+      ].map((message) => JSON.stringify(message)).join('\n') + '\n';
+      const result = spawnSync('sh', [script, 'mcp'], {
+        cwd: root, encoding: 'utf8', input, timeout: 5000,
+        env: { PATH: `${bin}:${process.env.PATH}`, HOME: '/home/node', MOCK_UID: uid, MCP_TEST_PRIV_LOG: log },
+      });
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(result.stderr, '');
+      const replies = result.stdout.trim().split('\n').map((line) => JSON.parse(line));
+      assert.equal(replies.length, 3);
+      assert.deepEqual(new Set(replies.map((reply) => reply.id)), new Set([1, 2, 3]));
+      assert.ok(replies.every((reply) => reply.jsonrpc === '2.0' && reply.result && !reply.error));
+      assert.ok(replies.find((reply) => reply.id === 3).result.tools.length > 0);
+      if (uid === '0') {
+        assert.match(readFileSync(log, 'utf8'), /--reuid=node\n--regid=node\n--init-groups\n--inh-caps=-all\n/);
+      } else {
+        assert.equal(existsSync(log), false, 'non-root MCP must not invoke setpriv');
+        const pairResult = spawnSync('sh', [script, 'mcp'], {
+          cwd: root, encoding: 'utf8', timeout: 5000,
+          env: { PATH: `${bin}:${process.env.PATH}`, HOME: '/home/node', MOCK_UID: uid, WHATSAPP_DOCKER_ROLE: 'pair' },
+        });
+        assert.equal(pairResult.status, 1);
+        assert.equal(pairResult.stdout, '');
+        assert.match(pairResult.stderr, /One-shot pair did not start/,
+          'an existing account named mcp must retain the pair confirmation guard');
+      }
+      for (const name of ['session', 'sessions', 'listener-data']) {
+        assert.equal(existsSync(path.join(dir, name)), false);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}

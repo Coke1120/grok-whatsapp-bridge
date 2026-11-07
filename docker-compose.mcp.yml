@@ -1,0 +1,58 @@
+# Mac mini / development hosts only. Build the CURRENT checkout before use:
+# docker compose -f docker-compose.yml -f docker-compose.mcp.yml build
+# This replaces the base v1.3.3 pin for every role. That published image does
+# not contain MCP. The separate local tag must never fall back to GHCR.
+# See docs/docker-mcp.md. Do not use the NAS host-network overlay on macOS.
+
+x-mcp-source: &mcp-source
+  image: grok-whatsapp-bridge:mcp-local
+  build: .
+  pull_policy: never
+
+services:
+  bridge:
+    <<: *mcp-source
+  listener:
+    <<: *mcp-source
+  pair:
+    <<: *mcp-source
+
+  # One attached stdio process per MCP client. Never start this with `up -d`.
+  mcp:
+    <<: *mcp-source
+    profiles: ["mcp"]
+    init: true
+    restart: "no"
+    command: ["mcp"]
+    stdin_open: true
+    tty: false
+    user: node
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    # Loopback works with MCP's URL restrictions without publishing a port
+    # or enabling remote URLs. Recreate MCP after recreating the bridge.
+    network_mode: "service:bridge"
+    depends_on:
+      bridge:
+        condition: service_healthy
+    environment:
+      HOME: /home/node
+      WHATSAPP_BRIDGE_URL: http://127.0.0.1:${WHATSAPP_BRIDGE_PORT:-37100}
+      WHATSAPP_INBOX_PATH: /app/listener-data/inbox.jsonl
+      WHATSAPP_MCP_ALLOWED_CHATS: ${WHATSAPP_MCP_ALLOWED_CHATS:-}
+      WHATSAPP_MCP_SEND_ENABLED: ${WHATSAPP_MCP_SEND_ENABLED:-0}
+      WHATSAPP_MCP_ALLOW_GROUPS: ${WHATSAPP_MCP_ALLOW_GROUPS:-0}
+      WHATSAPP_MCP_ALLOW_REMOTE: "0"
+    volumes:
+      - type: volume
+        source: wa-listener
+        target: /app/listener-data
+        read_only: true
+    healthcheck:
+      disable: true
+    # Recent-message JSON-RPC replies can contain private message text.
+    # The attached MCP client receives stdout/stderr; Docker keeps no log copy.
+    logging:
+      driver: none

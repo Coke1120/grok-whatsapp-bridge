@@ -39,7 +39,7 @@ export async function readRecentInbox(filePath, allowed, limit = 10) {
       try { event = JSON.parse(line); } catch { continue; }
       if (event.allowed !== true || !allowed.has(event.chatId)) continue;
       messages.push({
-        ts: event.ts, messageId: event.messageId || null, account: event.account || null,
+        ts: event.ts, messageId: event.messageId || null, deliveryId: event.deliveryId || null, account: event.account || null,
         chatId: event.chatId, senderId: event.senderId, senderName: event.senderName,
         body: event.body, hasMedia: !!event.hasMedia,
       });
@@ -91,6 +91,7 @@ export function createWhatsAppTools({
       ...options,
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(8000),
+      redirect: 'error',
     });
     const body = await response.json();
     if (!response.ok || (body && body.success === false)) {

@@ -21,3 +21,128 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+
+  docker-mcp:
+    # Build and run test images only. Release/deployment triggers are unchanged.
+    if: github.event_name == 'pull_request'
+    needs: node
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            node_arch: x64
+          - platform: linux/arm64
+            node_arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v4
+      - name: Validate merged MCP configuration
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.mcp.yml --profile mcp --profile listener --profile pair config --format json > "$RUNNER_TEMP/mcp-compose.json"
+          python3 - "$RUNNER_TEMP/mcp-compose.json" <<'PY'
+          import json, os, sys
+          services = json.load(open(sys.argv[1]))["services"]
+          for role in ("bridge", "listener", "pair", "mcp"):
+              service = services[role]
+              assert service["image"] == "grok-whatsapp-bridge:mcp-local"
+              assert service["build"]["context"] == os.getcwd()
+              assert service["pull_policy"] == "never"
+          mcp = services["mcp"]
+          assert mcp["user"] == "node" and mcp["read_only"]
+          assert mcp["stdin_open"] and not mcp.get("tty", False)
+          assert mcp["network_mode"] == "service:bridge"
+          assert not mcp.get("ports") and not mcp.get("expose")
+          assert mcp["cap_drop"] == ["ALL"]
+          assert mcp["logging"]["driver"] == "none"
+          assert len(mcp["volumes"]) == 1
+          assert mcp["volumes"][0]["source"] == "wa-listener"
+          assert mcp["volumes"][0]["read_only"]
+          assert all(p["host_ip"] == "127.0.0.1" for p in services["bridge"]["ports"])
+          PY
+      - name: Build and load test image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          tags: whatsapp-mcp-smoke:${{ matrix.node_arch }}
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=mcp-${{ matrix.node_arch }}
+          cache-to: type=gha,mode=max,scope=mcp-${{ matrix.node_arch }}
+      - name: Run isolated, non-root, read-only stdio smoke
+        timeout-minutes: 3
+        env:
+          TEST_PLATFORM: ${{ matrix.platform }}
+          TEST_ARCH: ${{ matrix.node_arch }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess, tempfile
+          image = "whatsapp-mcp-smoke:" + os.environ["TEST_ARCH"]
+          base = ["docker", "run", "--rm", "--platform", os.environ["TEST_PLATFORM"],
+                  "--network", "none", "--read-only", "--user", "node",
+                  "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                  "--log-driver", "none", "--no-healthcheck", "--pids-limit", "64", "--memory", "256m"]
+          def run(args, input=None):
+              result = subprocess.run(args, input=input, text=True, capture_output=True, timeout=60)
+              assert result.returncode == 0, result.stderr + result.stdout
+              assert not result.stderr, result.stderr
+              return result.stdout
+          guard = r'''
+          const assert = require('node:assert/strict'), fs = require('node:fs');
+          assert.equal(process.getuid(), 1000); assert.equal(process.getgid(), 1000);
+          assert.equal(process.versions.node.split('.')[0], '22');
+          assert.equal(process.arch, process.env.EXPECTED_ARCH);
+          assert(!process.stdin.isTTY && !process.stdout.isTTY);
+          const status = fs.readFileSync('/proc/self/status', 'utf8');
+          assert.match(status, /^CapEff:\s+0+$/m); assert.match(status, /^NoNewPrivs:\s+1$/m);
+          assert(!fs.existsSync('/var/run/docker.sock'));
+          fs.accessSync('/app/mcp/server.mjs'); fs.accessSync('/app/listener_delivery.mjs');
+          for (const target of ['/app/probe', '/app/listener-data/probe']) {
+            assert.throws(() => fs.writeFileSync(target, 'no'), e => ['EROFS', 'EACCES'].includes(e.code));
+          }
+          '''
+          try:
+              with tempfile.TemporaryDirectory() as temp:
+                  directory = pathlib.Path(temp)
+                  directory.chmod(0o755)
+                  chat = "15550000001@s.whatsapp.net"
+                  inbox = directory / "inbox.jsonl"
+                  inbox.write_text(json.dumps({"allowed": True, "chatId": chat, "body": "CI fixture", "messageId": "ci-only"}) + "\n")
+                  inbox.chmod(0o444)
+                  mounted = base + ["--mount", "type=bind,src=" + temp + ",dst=/app/listener-data,readonly"]
+                  run(mounted + ["--name", "mcp-guard", "-e", "EXPECTED_ARCH=" + os.environ["TEST_ARCH"], "--entrypoint", "node", image, "-e", guard])
+                  messages = [
+                      {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                      {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                      {"jsonrpc": "2.0", "id": 2, "method": "ping"},
+                      {"jsonrpc": "2.0", "id": 3, "method": "tools/list"},
+                      {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "whatsapp_recent_messages", "arguments": {"limit": 1}}},
+                      {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "whatsapp_send_message", "arguments": {"chatId": chat, "message": "must not send"}}},
+                  ]
+                  output = run(mounted + ["--name", "mcp-stdio", "-i", "-e", "WHATSAPP_MCP_ALLOWED_CHATS=" + chat,
+                               "-e", "WHATSAPP_MCP_SEND_ENABLED=0", image, "mcp"],
+                               "".join(json.dumps(m) + "\n" for m in messages))
+                  replies = [json.loads(line) for line in output.splitlines()]
+                  assert len(replies) == 5, output
+                  results = {reply["id"]: reply["result"] for reply in replies if reply["jsonrpc"] == "2.0"}
+                  assert set(results) == {1, 2, 3, 4, 5}, output
+                  assert len(results[3]["tools"]) == 4
+                  assert json.loads(results[4]["content"][0]["text"])[0]["messageId"] == "ci-only"
+                  assert results[5]["isError"] and "disabled" in results[5]["content"][0]["text"]
+                  print("Node 22 " + os.environ["TEST_ARCH"] + ": isolated MCP stdio and hardening passed")
+          finally:
+              subprocess.run(["docker", "rm", "-f", "mcp-guard", "mcp-stdio"], capture_output=True, timeout=15)
+          PY
+      - name: Remove smoke containers if interrupted
+        if: always()
+        run: docker rm -f mcp-guard mcp-stdio >/dev/null 2>&1 || true
