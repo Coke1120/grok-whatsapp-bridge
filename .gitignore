@@ -12,3 +12,6 @@ pair-qr.png
 .DS_Store
 docker-compose.override.yml
 compose.override.yml
+
+# Atomic listener state temporary files may contain private event payloads.
+listener-state.json.*.tmp

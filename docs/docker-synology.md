@@ -212,7 +212,7 @@ Container Manager and Portainer usually have one YAML editor and may not support
 
 ## Linked device name
 
-WhatsApp → Linked devices shows the Baileys browser name. Sessions linked by an older image can still say **Google Chrome (Hermes Agent)**. An image built from the rename says **Google Chrome (Grok WhatsApp Bridge)**. The label usually changes only after that image is the one running **and** the device is linked again. Do not re-pair a working NAS session only to rename the row. Git tag `v1.3.2` contains the rename. Git tag `v1.3.1` does not, so image `:v1.3.1` built from that tag still has the old label.
+Current source configures the Baileys companion name as **WhatsApp Bridge** with Chrome platform metadata, intended to appear as **Google Chrome (WhatsApp Bridge)**. WhatsApp controls the actual wording; this has not been checked on a live phone. Existing linked sessions can retain the earlier **Hermes Agent** or **Grok WhatsApp Bridge** name. Pairing normally records this metadata, so a source/image update alone may not rename an already linked row. Do not re-pair or delete a working NAS session only to change its label. Published v1.3.2/v1.3.3 images have the previous Grok name and do not contain this new source change.
 
 ## First QR, and a one-shot pair
 

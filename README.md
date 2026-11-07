@@ -1,4 +1,8 @@
-# grok-whatsapp-bridge (Grok Bot / Cursor plugin)
+# WhatsApp Agent Bridge (Grok Bot / OpenMausBot / Hermes)
+
+**WhatsApp Agent Bridge** is the general-purpose name for the existing Baileys bridge; the repository URL and GHCR image remain `grok-whatsapp-bridge` for backward compatibility.
+
+**OpenMausBot on Mac mini:** [Install the local MCP adapter and optional WhatsApp webhook automation](docs/openmausbot.md). The adapter reuses the current paired WhatsApp session and never drains the bridge's inbound queue.
 
 Marketplace plugin that ships the **whatsapp-bridge** agent skill plus the runnable Baileys HTTP bridge sources in this repo.
 
@@ -35,7 +39,7 @@ Default bind: `127.0.0.1:37100`.
 
 ## Primary ops: Mac mini + Tailscale Serve
 
-Current ops run the bridge on the **Mac mini** (bare metal, Node 18+). It listens on loopback. **Tailscale Serve** publishes it to the tailnet only. Do not use Tailscale Funnel, and do not publish port 37100 on the public internet.
+Current ops run the bridge on the **Mac mini** (bare metal, Node 22+). It listens on loopback. **Tailscale Serve** publishes it to the tailnet only. Do not use Tailscale Funnel, and do not publish port 37100 on the public internet.
 
 Synology / NAS Docker stays in this repo as a documented **optional** capability. It is **not** current Primary ops. The NAS bridge has been cleaned and is not in use. Tutorial: [docs/docker-synology.md](docs/docker-synology.md).
 
@@ -105,7 +109,7 @@ Portainer: set variables in the stack environment UI. Do not use a relative `env
 
 If Compose bridge DNS/egress dies (`EAI_AGAIN` for `web.whatsapp.com` inside the container, no QR, close 408) while the NAS host can resolve WhatsApp, use `docker-compose.host-net.yml`: host network and `WHATSAPP_BIND_HOST=127.0.0.1`. That file is not the default. Do not bind `0.0.0.0` on the host network.
 
-WhatsApp → Linked devices may still show **Google Chrome (Hermes Agent)** until an image that contains the rename is running, and usually until the next link. Do not re-pair a working session only to change that label. Image `:v1.3.2` (git tag `v1.3.2`) contains the rename. Image `:v1.3.1` built from git tag `v1.3.1` does not.
+Current source advertises Chrome with companion name **WhatsApp Bridge**, intended to display as **Google Chrome (WhatsApp Bridge)** in WhatsApp → Linked devices. The exact wording is controlled by WhatsApp and has not been live-verified. Existing links can retain **Hermes Agent** or **Grok WhatsApp Bridge** from older images; the new metadata is normally sent during pairing, not retroactively. Do not delete a working session or re-pair only to change the label. Published `:v1.3.2`/`:v1.3.3` images still contain the previous Grok name, not this source update.
 
 Optional / legacy NAS tutorial (Container Manager, pull vs build, Tailscale / SSH, host network, one-shot pair, upgrade without wiping `session/`): [docs/docker-synology.md](docs/docker-synology.md). That page is not the Primary path.
 
@@ -161,6 +165,7 @@ See `.env.example`. Important:
 - `WHATSAPP_MODE` — `bot` (recommended) or `self-chat`
 - `WHATSAPP_BIND_HOST` — leave unset on bare metal (`127.0.0.1`). Docker sets `0.0.0.0` inside the container and still publishes loopback on the host.
 - `WHATSAPP_WAKE_WEBHOOK_URL` / `WHATSAPP_WAKE_WEBHOOK_AUTH` — optional agent wake
+- `WHATSAPP_WAKE_RETRY_ENABLED=1` — bounded automatic delivery retries, only after receiver-side durable deduplication is verified. Default off. See [delivery guarantees](docs/webhook-delivery.md).
 - `WHATSAPP_PROGRAMMATIC_ACK` — fixed ack text; empty = off
 - `session/` — **secret**; never commit
 
@@ -180,3 +185,5 @@ See `.env.example`. Important:
 ## License
 
 MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+For the source-built Mac mini Docker MCP setup, see [Docker MCP](docs/docker-mcp.md). The pinned v1.3.3 release image does not contain MCP.
