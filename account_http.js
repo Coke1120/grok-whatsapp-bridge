@@ -120,7 +120,7 @@ export function createBridgeApp({
       scriptHash,
       sendReadReceipts: snap.sendReadReceipts,
       session: snap.session,
-      capabilities: { outboundMentions: true },
+      capabilities: { outboundMentions: true, ...(snap.independentScopes ? { independentScopes: true } : {}) },
     };
   }
 

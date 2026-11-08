@@ -8,6 +8,9 @@ import { DisconnectReason, generateRegistrationNode, proto } from '@whiskeysocke
 import { DEFAULT_REPLY_PREFIX } from '../accounts_config.js';
 import { createAccountRuntime } from '../account_runtime.js';
 import { PRE_QR_EGRESS_HINT } from '../bridge_helpers.js';
+import { parseAccessScopes, scopeForAccount } from '../access_scopes.js';
+import http from 'node:http';
+import { createBridgeApp } from '../account_http.js';
 
 test('linked device browser name is WhatsApp Bridge', () => {
   const src = readFileSync(new URL('../account_runtime.js', import.meta.url), 'utf8');
@@ -532,5 +535,176 @@ test('linked-device pairing advertises Chrome with WhatsApp Bridge companion nam
     assert.equal(device.os, 'WhatsApp Bridge');
     assert.equal(device.platformType, proto.DeviceProps.PlatformType.CHROME);
     await handle.runtime.pause();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+function scopedPolicy(fields) {
+  return scopeForAccount(parseAccessScopes(JSON.stringify({ default: fields })), 'default');
+}
+
+test('scoped runtime reads other DMs without enabling sends or downloading attachments', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-scopes-'));
+  let downloads = 0;
+  try {
+    const handle = harness(dir, {
+      accessScope: scopedPolicy({ readAllDms: true, triggerChats: ['111@lid'], sendChats: ['111@lid'] }),
+      allowedUsers: '', groupPolicy: 'disabled',
+      deps: { async downloadMediaMessage() { downloads += 1; return Buffer.from('fixture'); } },
+    });
+    await connect(handle);
+    await handle.sockets[0].emit('messages.upsert', { type: 'notify', messages: [
+      { key: { remoteJid: '222@s.whatsapp.net', id: 'read-only', fromMe: false }, message: { conversation: 'passive' } },
+      { key: { remoteJid: '222@s.whatsapp.net', id: 'image', fromMe: false }, message: { imageMessage: { caption: 'caption', mimetype: 'image/jpeg' } } },
+      { key: { remoteJid: '111@g.us', id: 'group', fromMe: false }, message: { conversation: 'denied group' } },
+    ] });
+    const events = handle.runtime.drainMessages();
+    assert.equal(events.length, 2);
+    assert(events.every((e) => e.scopeVersion === 1 && e.eventType === 'message' && e.fromOwner === false));
+    assert.equal(downloads, 0);
+    assert.equal((await handle.runtime.send({ chatId: '222@s.whatsapp.net', message: 'must not send' })).status, 403);
+    assert.equal((await handle.runtime.send({ chatId: '111@lid', message: 'approved fixture' })).status, 200);
+    assert.equal(handle.sockets[0].sent.length, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('scoped runtime guards every REST-backed side effect before file/socket access', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-scope-send-'));
+  try {
+    const handle = harness(dir, { accessScope: scopedPolicy({ readChats: ['111@lid'], sendChats: ['111@lid'] }), sendReadReceipts: true });
+    await connect(handle);
+    const body = { chatId: '222@s.whatsapp.net', message: 'no', messageId: 'm', filePath: '/never-read/private-file',
+      question: 'no', options: ['a', 'b'], latitude: 1, longitude: 2,
+      key: { remoteJid: '222@s.whatsapp.net', id: 'm', fromMe: false } };
+    for (const name of ['send', 'edit', 'sendMedia', 'sendPoll', 'sendLocation', 'typing', 'markRead']) {
+      assert.equal((await handle.runtime[name](body)).status, 403, name);
+    }
+    assert.equal((await handle.runtime.chatInfo('222@s.whatsapp.net')).status, 403);
+    assert.equal(handle.sockets[0].sent.length, 0);
+    assert.equal(handle.sockets[0].readKeys.length, 0);
+    assert.equal(handle.runtime.healthSnapshot().independentScopes, true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('explicit empty runtime read scope discards messages and both poll-update paths', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-scope-poll-'));
+  try {
+    const handle = harness(dir, { accessScope: scopedPolicy({ sendChats: ['111@s.whatsapp.net'] }), allowedUsers: '*' });
+    await connect(handle);
+    const poll = await handle.runtime.sendPoll({ chatId: '111@s.whatsapp.net', question: 'Fixture?', options: ['A', 'B'] });
+    assert.equal(poll.status, 200);
+    const pollId = poll.body.messageId;
+    await handle.sockets[0].emit('messages.upsert', { type: 'notify', messages: [
+      { key: { remoteJid: '111@s.whatsapp.net', id: 'plain', fromMe: false }, message: { conversation: 'must not cache' } },
+      { key: { remoteJid: '111@s.whatsapp.net', id: 'vote', fromMe: false }, message: { pollUpdateMessage: { pollCreationMessageKey: { id: pollId, remoteJid: '111@s.whatsapp.net' }, vote: { selectedOptions: ['A'] } } } },
+    ] });
+    await handle.sockets[0].emit('messages.update', [{ key: { id: pollId, remoteJid: '111@s.whatsapp.net' },
+      update: { pollUpdates: [{ pollUpdateMessageKey: { remoteJid: '111@s.whatsapp.net', id: 'v' }, vote: { selectedOptions: ['A'] } }] } }]);
+    assert.deepEqual(handle.runtime.drainMessages(), []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('raw REST cannot bypass account-specific send ceilings or conflicting account selectors', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-scope-rest-'));
+  const owner = '111@lid';
+  const other = '222@s.whatsapp.net';
+  const policies = parseAccessScopes(JSON.stringify({
+    ops: { readAllDms: true, sendChats: [owner] }, sales: { readChats: [other], sendChats: [other] },
+  }));
+  let server;
+  try {
+    const ops = harness(path.join(dir, 'ops'), { name: 'ops', multi: true, accessScope: scopeForAccount(policies, 'ops') });
+    const sales = harness(path.join(dir, 'sales'), { name: 'sales', multi: true, accessScope: scopeForAccount(policies, 'sales') });
+    await connect(ops); await connect(sales);
+    server = http.createServer(createBridgeApp({ accounts: [ops.runtime, sales.runtime], defaultName: 'ops', multi: true }));
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const post = (p, chatId, headers = {}) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ chatId, message: 'synthetic fixture' }) });
+    assert.equal((await post('/accounts/sales/send', owner)).status, 403);
+    assert.equal((await post('/send?account=sales', owner)).status, 403);
+    assert.equal((await post('/send', other)).status, 403);
+    assert.equal((await post('/send', owner, { 'x-whatsapp-account': 'sales' })).status, 403);
+    assert.equal((await post('/accounts/ops/send?account=sales', owner)).status, 400);
+    assert.equal((await fetch(base + '/accounts/sales/chat/' + encodeURIComponent(owner))).status, 403);
+    assert.equal(ops.sockets[0].sent.length + sales.sockets[0].sent.length, 0);
+    assert.equal((await post('/accounts/ops/send', owner)).status, 200);
+    assert.equal((await post('/accounts/sales/send', other)).status, 200);
+    assert.equal(ops.sockets[0].sent.length, 1);
+    assert.equal(sales.sockets[0].sent.length, 1);
+    const health = await (await fetch(base + '/health')).json();
+    assert.equal(health.capabilities.independentScopes, true);
+  } finally {
+    if (server) await new Promise((resolve) => server.close(resolve));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('scoped poll updates require outer, nested and cached poll chat keys to agree before decoding', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-scope-poll-keys-'));
+  const owner = '111@lid', other = '222@s.whatsapp.net';
+  const output = [];
+  const write = process.stdout.write;
+  try {
+    const handle = harness(dir, { accessScope: scopedPolicy({ readChats: [owner], sendChats: [other] }) });
+    await connect(handle);
+    const sent = await handle.runtime.sendPoll({ chatId: other, question: 'Denied-read poll fixture', options: ['Private fixture A', 'Private fixture B'] });
+    assert.equal(sent.status, 200);
+    process.stdout.write = function (chunk, ...args) { if (String(chunk).includes('poll_update_decode')) { output.push(String(chunk)); return true; } return write.call(this, chunk, ...args); };
+    await handle.sockets[0].emit('messages.upsert', { type: 'notify', messages: [{
+      key: { id: 'vote', remoteJid: owner, fromMe: false }, message: { pollUpdateMessage: {
+        pollCreationMessageKey: { id: sent.body.messageId, remoteJid: other }, vote: { selectedOptions: ['Private fixture A'] },
+      } },
+    }] });
+    for (const nestedChat of [owner, other]) {
+      await handle.sockets[0].emit('messages.update', [{ key: { id: sent.body.messageId, remoteJid: owner }, update: {
+        pollUpdates: [{ pollUpdateMessageKey: { id: 'vote-2', remoteJid: nestedChat }, vote: { selectedOptions: ['Private fixture B'] } }],
+      } }]);
+    }
+    assert.deepEqual(handle.runtime.drainMessages(), []);
+    assert.deepEqual(output, []);
+  } finally { process.stdout.write = write; rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('readable polls from both socket paths are marked read-only poll provenance', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-scope-poll-provenance-'));
+  const chat = '111@s.whatsapp.net';
+  try {
+    const handle = harness(dir, { accessScope: scopedPolicy({ readAllDms: true, triggerChats: [chat], sendChats: [chat] }) });
+    await connect(handle);
+    const sent = await handle.runtime.sendPoll({ chatId: chat, question: 'Fixture?', options: ['A', 'B'] });
+    await handle.sockets[0].emit('messages.upsert', { type: 'notify', messages: [{
+      key: { id: 'vote-1', remoteJid: chat, fromMe: false }, message: { pollUpdateMessage: {
+        pollCreationMessageKey: { id: sent.body.messageId, remoteJid: chat }, vote: { selectedOptions: ['A'] },
+      } },
+    }] });
+    await handle.sockets[0].emit('messages.update', [{ key: { id: sent.body.messageId, remoteJid: chat }, update: {
+      pollUpdates: [{ pollUpdateMessageKey: { id: 'vote-2', remoteJid: chat }, vote: { selectedOptions: ['B'] } }],
+    } }]);
+    const events = handle.runtime.drainMessages();
+    assert.equal(events.length, 2);
+    assert(events.every((e) => e.scopeVersion === 1 && e.eventType === 'poll_update'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('scoped owner forwarding and self-chat preserve owner provenance and discard own echoes', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-scope-owner-'));
+  const owner = '111@lid';
+  try {
+    const handle = harness(path.join(dir, 'bot'), { forwardOwnerMessages: true,
+      accessScope: scopedPolicy({ readAllDms: true, triggerChats: [owner], sendChats: [owner] }) });
+    await connect(handle);
+    const sent = await handle.runtime.send({ chatId: owner, message: 'synthetic reply' });
+    await handle.sockets[0].emit('messages.upsert', { type: 'notify', messages: [
+      { key: { remoteJid: owner, id: sent.body.messageId, fromMe: true }, message: { conversation: 'synthetic reply' } },
+      { key: { remoteJid: owner, id: 'owner-manual', fromMe: true }, message: { conversation: 'manual fixture' } },
+    ] });
+    const events = handle.runtime.drainMessages();
+    assert.equal(events.length, 1);
+    assert.equal(events[0].fromOwner, true);
+    const self = harness(path.join(dir, 'self'), { mode: 'self-chat', accessScope: scopedPolicy({ readAllDms: true }) });
+    await connect(self);
+    await self.sockets[0].emit('messages.upsert', { type: 'notify', messages: [{
+      key: { remoteJid: '15550001111@s.whatsapp.net', id: 'self-manual', fromMe: true }, message: { conversation: 'self fixture' },
+    }] });
+    assert.equal(self.runtime.drainMessages()[0].fromOwner, true);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

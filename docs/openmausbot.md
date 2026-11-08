@@ -1,6 +1,6 @@
 # OpenMausBot + WhatsApp Agent Bridge (Mac mini)
 
-This project keeps **one** Baileys session and makes your **existing** WhatsApp bridge available to OpenMausBot. No Composio and no Meta Business account are required. WhatsApp Web/Baileys is unofficial and can risk account restrictions; start with a spare number.
+This project reuses your **existing** paired WhatsApp bridge in OpenMausBot, with one socket per configured account. No Composio and no Meta Business account are required. WhatsApp Web/Baileys is unofficial and can risk account restrictions; start with a spare number.
 
 ## 1. Keep the existing Mac mini bridge
 
@@ -20,6 +20,11 @@ The `/health` response must say `"status":"connected"` before attempting to send
 The bridge REST API is unauthenticated; bind it only to `127.0.0.1`. The MCP process talks to that same loopback address and does not open a new listening port. Never expose port 37100, the MCP process, or session files to the public internet.
 
 ## 2. Configure an allowlisted MCP server
+
+For independent read, automatic-trigger and send permissions, use the optional
+[account-scoped policy](access-scopes.md) on bridge, listener and MCP. The legacy
+configuration below uses one chat allowlist for both reading and sending; do not
+widen it to implement “read every DM but reply to one contact.”
 
 Find the real JID of the permitted chat from a previously received **allowlisted** event (for example `inbox.jsonl`). A DM may have `123456789@s.whatsapp.net` or a Linked ID such as `123456789@lid`. Keep the JID exactly as received; do not convert `@lid` into a phone JID. In self-chat mode choose your own self-chat JID; in bot mode choose only authorized chats.
 
