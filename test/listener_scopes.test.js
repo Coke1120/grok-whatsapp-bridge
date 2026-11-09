@@ -22,7 +22,7 @@ test('passive read caching is independent of automatic wake, acknowledgement and
   const files = paths(dir);
   let queue = [event(OTHER)];
   try {
-    const listener = createInboxListener({ ...files, accounts: [{ name: 'default', allowedUsers: '*',
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001', ...files, accounts: [{ name: 'default', allowedUsers: '*',
       accessScope: scope({ readAllDms: true, triggerChats: [OWNER], sendChats: [OWNER] }) }],
       defaultAck: 'fixture ack', defaultWakeUrl: 'https://receiver.invalid/hook', log() {}, warn() {},
       fetch: async (url, options) => { calls.push({ url, options }); if (url.endsWith('/messages')) { const batch = queue; queue = []; return response(batch); } return response({}); },
@@ -49,7 +49,7 @@ test('scoped listener never retains denied bodies or accepts cross-account event
   const files = paths(dir);
   const logs = [];
   try {
-    const listener = createInboxListener({ ...files, accounts: [{ name: 'default', allowedUsers: '*', accessScope: scope({ readChats: [OWNER] }) }],
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001', ...files, accounts: [{ name: 'default', allowedUsers: '*', accessScope: scope({ readChats: [OWNER] }) }],
       defaultWakeUrl: 'https://receiver.invalid/hook', log: (s) => logs.push(s), warn() {},
       fetch: async () => response([event(OTHER, { body: 'must not persist' }), event(OWNER, { account: 'another', body: 'wrong account' })]),
     });
@@ -65,7 +65,7 @@ test('poll aggregates, owner messages and old unmarked events are read-only, nev
   const files = paths(dir);
   const writes = [];
   try {
-    const listener = createInboxListener({ ...files, accounts: [{ name: 'default', accessScope: scope({ readAllDms: true, triggerChats: [OWNER], sendChats: [OWNER] }) }],
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001', ...files, accounts: [{ name: 'default', accessScope: scope({ readAllDms: true, triggerChats: [OWNER], sendChats: [OWNER] }) }],
       defaultAck: 'no', defaultWakeUrl: 'https://receiver.invalid/hook', log() {}, warn() {},
       fetch: async (url, options) => { if (options?.method === 'POST') writes.push(url); return response(url.endsWith('/messages') ? [
         event(OWNER, { messageId: 'poll', eventType: 'poll_update' }),
@@ -89,7 +89,7 @@ test('pending wake is blocked when current trigger or read scope is revoked', as
     let wakes = 0;
     const account = { name: 'default', accessScope: scope({ readAllDms: true, triggerChats: [OWNER] }) };
     try {
-      const listener = createInboxListener({ ...files, accounts: [account], defaultWakeUrl: 'https://receiver.invalid/hook',
+      const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001', ...files, accounts: [account], defaultWakeUrl: 'https://receiver.invalid/hook',
         wakeRetryEnabled: true, wakeRetryDelays: [1], now: () => now, log() {}, warn() {},
         fetch: async (url) => {
           if (url.endsWith('/messages')) return response(polls++ === 0 ? [event(OWNER)] : []);
@@ -111,7 +111,7 @@ test('readable trigger without a send grant wakes but never acknowledges', async
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-listener-scope-no-send-'));
   const calls = [];
   try {
-    const listener = createInboxListener({ ...paths(dir), accounts: [{ name: 'default', accessScope: scope({ readChats: [OWNER], triggerChats: [OWNER] }) }],
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001', ...paths(dir), accounts: [{ name: 'default', accessScope: scope({ readChats: [OWNER], triggerChats: [OWNER] }) }],
       defaultAck: 'must not send', defaultWakeUrl: 'https://receiver.invalid/hook', log() {}, warn() {},
       fetch: async (url, options) => { calls.push({ url, options }); return response(url.endsWith('/messages') ? [event(OWNER)] : {}); },
     });
@@ -129,7 +129,7 @@ test('named listener accounts keep equal chat IDs, trigger permissions and ackno
   }));
   const accounts = ['primary', 'secondary'].map((name) => ({ name, accessScope: scopeForAccount(policy, name) }));
   try {
-    const listener = createInboxListener({ ...paths(dir), accounts, multi: true,
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001', ...paths(dir), accounts, multi: true,
       defaultAck: 'fixture ack', defaultWakeUrl: 'https://receiver.invalid/hook', log() {}, warn() {},
       fetch: async (url, options) => {
         calls.push({ url, options });
@@ -154,7 +154,7 @@ test('a persisted wake with a mismatched payload account is blocked after listen
   const files = paths(dir);
   const policy = parseAccessScopes(JSON.stringify({ primary: { readAllDms: true, triggerChats: [OWNER] } }));
   let wakes = 0, polls = 0, now = 100;
-  const opts = { ...files, multi: true, accounts: [{ name: 'primary', accessScope: scopeForAccount(policy, 'primary') }],
+  const opts = { apiToken: 'fixture-bridge-token-not-a-secret-0001', ...files, multi: true, accounts: [{ name: 'primary', accessScope: scopeForAccount(policy, 'primary') }],
     defaultWakeUrl: 'https://receiver.invalid/hook', wakeRetryEnabled: true, wakeRetryDelays: [1],
     now: () => now, log() {}, warn() {},
     fetch: async (url) => {

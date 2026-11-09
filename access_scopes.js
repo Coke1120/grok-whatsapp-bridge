@@ -18,8 +18,8 @@ function chatSet(value, field) {
   return new Set(value);
 }
 
-// Empty/unset preserves the legacy installation. An explicit {} denies every
-// account. Missing fields/accounts NEVER inherit a legacy or another account's
+// Empty/unset preserves legacy intake; outgoing handlers still require an
+// explicit send policy. An explicit {} denies every account. Missing fields/accounts NEVER inherit a legacy or another account's
 // permission. All-DM reading is a boolean opt-in, not a send/trigger wildcard.
 export function parseAccessScopes(raw) {
   if (raw === undefined || String(raw).trim() === '') return null;

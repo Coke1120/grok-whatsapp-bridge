@@ -1,4 +1,5 @@
-# Grok WhatsApp Bridge. The HTTP API is not authenticated.
+# Grok WhatsApp Bridge. Current source requires a Bearer token on every route.
+# The pinned legacy release below predates this security change. See docs/api-security.md.
 # Pull ghcr.io/coke1120/grok-whatsapp-bridge:<tag>. Do not build this file on a NAS.
 # Synology Container Manager and Portainer must not pass --build. On-box npm ci
 # hangs there. Dev hosts that need a local image use docker-compose.build.yml.
@@ -16,6 +17,7 @@ x-app-env: &app-env
   # directory and drops or ignores secrets. Do not commit real values.
   # Docker-only values below stay fixed so a bare-metal .env cannot point the
   # container at a host path or at 127.0.0.1 inside bridge networking.
+  WHATSAPP_API_TOKEN: ${WHATSAPP_API_TOKEN:-}
   WHATSAPP_BRIDGE_PORT: ${WHATSAPP_BRIDGE_PORT:-37100}
   WHATSAPP_BIND_HOST: "0.0.0.0"
   # Default `bridge` is the Compose DNS name. Set WHATSAPP_TRUSTED_HOSTS in
@@ -27,8 +29,8 @@ x-app-env: &app-env
   WHATSAPP_SESSION_DIR: /app/session
   HOME: /home/node
   WHATSAPP_ALLOWED_USERS: ${WHATSAPP_ALLOWED_USERS:-}
-  # Optional independent account-scoped read / wake / send ceilings. Empty is
-  # legacy compatibility; explicit JSON {} denies all accounts.
+  # Independent account-scoped read / wake / send ceilings. Empty keeps legacy
+  # intake but DENIES all outgoing operations; explicit JSON {} denies all accounts.
   WHATSAPP_SCOPES: ${WHATSAPP_SCOPES:-}
   WHATSAPP_GROUP_ALLOWED_USERS: ${WHATSAPP_GROUP_ALLOWED_USERS:-}
   WHATSAPP_MODE: ${WHATSAPP_MODE:-bot}
@@ -79,8 +81,9 @@ services:
       # Uncomment on bridge AND listener when WHATSAPP_ACCOUNTS=./accounts.json:
       # - ./accounts.json:/app/accounts.json:ro
     healthcheck:
-      # HTTP is up. This stays green while WhatsApp is connecting or showing a QR.
-      test: ["CMD", "node", "-e", "const p=process.env.WHATSAPP_BRIDGE_PORT||'37100';fetch('http://127.0.0.1:'+p+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      # HTTP is up. New source requires the token; legacy pinned images ignore it.
+      # Green on an old image does NOT prove authentication is enforced.
+      test: ["CMD", "node", "-e", "const p=process.env.WHATSAPP_BRIDGE_PORT||'37100';const t=process.env.WHATSAPP_API_TOKEN;const h=t?{Authorization:'Bearer '+t}:{};fetch('http://127.0.0.1:'+p+'/health',{headers:h,redirect:'error',signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3

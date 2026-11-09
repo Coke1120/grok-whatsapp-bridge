@@ -5,16 +5,19 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createInboxListener } from '../listener.mjs';
+import { parseAccessScopes, scopeForAccount } from '../access_scopes.js';
 import { saveListenerState, deliveryIdentity } from '../listener_delivery.mjs';
 import { readRecentInbox } from '../mcp/tools.mjs';
 
-const event = (id = 'm1', chatId = '111@s.whatsapp.net') => ({ messageId: id, chatId, senderId: '111@s.whatsapp.net', body: 'hello' });
+const event = (id = 'm1', chatId = '111@s.whatsapp.net') => ({ scopeVersion: 1, eventType: 'message', fromOwner: false, messageId: id, chatId, senderId: '111@s.whatsapp.net', body: 'hello' });
 const response = (status = 200, payload = {}) => ({ status, ok: status >= 200 && status < 300, async text() { return JSON.stringify(payload); } });
 function setup(t, extra = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-delivery-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const options = {
-    accounts: [{ name: 'default', allowedUsers: '111' }],
+    apiToken: 'fixture-bridge-token-not-a-secret-0001',
+    accounts: [{ name: 'default', allowedUsers: '111', accessScope: extra.defaultAck
+      ? scopeForAccount(parseAccessScopes(JSON.stringify({ default: { readChats: ['111@s.whatsapp.net'], triggerChats: ['111@s.whatsapp.net'], sendChats: ['111@s.whatsapp.net'] } })), 'default') : null }],
     defaultWakeUrl: 'https://example.invalid/wake', defaultWakeAuth: 'secret-token',
     inboxPath: path.join(dir, 'inbox.jsonl'), statePath: path.join(dir, 'listener-state.json'),
     unreadFlagPath: path.join(dir, 'unread.flag'), log() {}, warn() {}, ...extra,
@@ -126,7 +129,7 @@ test('interrupted in-flight request only retries when idempotent receiver opt-in
   assert.equal(sent, 1);
   assert.equal(x.state().pendingWakes[0].status, 'needs_review');
   saveListenerState(x.options.statePath, state);
-  await createInboxListener({ ...x.options, wakeRetryEnabled: true, fetch: async (url) => {
+  await createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001', ...x.options, wakeRetryEnabled: true, fetch: async (url) => {
     if (url.endsWith('/messages')) return response(200, []);
     sent++; return response();
   } }).tick();
@@ -142,7 +145,7 @@ test('removed allowlist or changed destination blocks stale deliveries', async (
       sent++; return response(503);
     } });
     await createInboxListener(x.options).tick();
-    await createInboxListener({ ...x.options, ...changed, now: () => 2 }).tick();
+    await createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001', ...x.options, ...changed, now: () => 2 }).tick();
     assert.equal(sent, 1);
     assert.equal(x.state().pendingWakes[0].status, 'blocked');
   }
@@ -180,16 +183,17 @@ test('state is atomically replaced with private mode and no leftover temp file',
 });
 
 test('actual hanging webhook aborts, redirects are not followed, bearer never reaches redirect target', async (t) => {
-  let received = 0;
+  const received = [];
   let mode = 'hang';
   const server = createServer((req, res) => {
-    received++;
+    received.push({ path: req.url, authorization: req.headers.authorization });
     if (req.url === '/target') { res.end('must not reach'); return; }
     if (mode === 'redirect') { res.writeHead(307, { Location: '/target' }); res.end(); }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
-  const x = setup(t, { defaultWakeUrl: `http://127.0.0.1:${server.address().port}/wake`, wakeTimeoutMs: 50, fetch: async (url, options) => {
+  const x = setup(t, { // Leave time for the real loopback handshake on CPU-limited test runners.
+    defaultWakeUrl: `http://127.0.0.1:${server.address().port}/wake`, wakeTimeoutMs: 1000, fetch: async (url, options) => {
     if (url.endsWith('/messages')) return response(200, [event(mode)]);
     return fetch(url, options);
   } });
@@ -197,7 +201,10 @@ test('actual hanging webhook aborts, redirects are not followed, bearer never re
   assert.equal(x.state().pendingWakes[0].status, 'needs_review');
   mode = 'redirect';
   await createInboxListener(x.options).tick();
-  assert.equal(received, 2);
+  assert.deepEqual(received, [
+    { path: '/wake', authorization: 'Bearer secret-token' },
+    { path: '/wake', authorization: 'Bearer secret-token' },
+  ]);
   assert.equal(x.state().pendingWakes.length, 2);
   assert.equal(x.state().pendingWakes[1].status, 'failed');
   assert.equal(x.state().pendingWakes[1].lastFailure, 'http_307');
@@ -210,7 +217,7 @@ test('turning retries off retains a scheduled attempt for review', async (t) => 
     sent++; return response(503);
   } });
   await createInboxListener(x.options).tick(); time = 2;
-  await createInboxListener({ ...x.options, wakeRetryEnabled: false }).tick();
+  await createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001', ...x.options, wakeRetryEnabled: false }).tick();
   assert.equal(sent, 1);
   assert.equal(x.state().pendingWakes[0].status, 'needs_review');
 });

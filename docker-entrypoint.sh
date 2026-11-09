@@ -71,18 +71,18 @@ is_multi() {
 
 bridge_http() {
   # $1 port  $2 health|pause|resume  $3 account (pause/resume)
-  node --input-type=module -e '
-    const port = process.argv[1];
-    const action = process.argv[2];
-    const account = process.argv[3] || "";
-    const path = action === "health"
-      ? "/health"
-      : "/accounts/" + encodeURIComponent(account) + "/" + action;
-    fetch("http://127.0.0.1:" + port + path, {
-      method: action === "health" ? "GET" : "POST",
-      signal: AbortSignal.timeout(4000),
-    }).then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1));
-  ' "$1" "$2" "${3:-}"
+  WHATSAPP_BRIDGE_PORT="$1" node bridge_http_client.mjs "$2" "${3:-}"
+}
+
+check_pair_bridge() {
+  # Only a definite refused TCP connection proves this namespace has no listener.
+  # HTTP 401/403/5xx, invalid credentials, redirects and timeouts must stop pairing.
+  bridge_status=0
+  bridge_http "$port" health || bridge_status=$?
+  if [ "$bridge_status" -ne 0 ] && [ "$bridge_status" -ne 2 ]; then
+    echo "Cannot safely verify bridge state. Not pairing; check API authentication and connectivity." >&2
+    exit 1
+  fi
 }
 
 run_pair() {
@@ -102,9 +102,10 @@ run_pair() {
     exit 1
   fi
 
+  check_pair_bridge
   if [ -n "$account" ]; then
     paused=0
-    if bridge_http "$port" health; then
+    if [ "$bridge_status" -eq 0 ]; then
       if ! bridge_http "$port" pause "$account"; then
         echo "Bridge is up but account \"${account}\" could not be paused. Not pairing." >&2
         exit 1
@@ -123,16 +124,20 @@ run_pair() {
       if [ "$code" -eq 0 ]; then
         if bridge_http "$port" resume "$account"; then
           echo "Resumed \"${account}\" on the running bridge."
+        else
+          echo "Pairing completed, but resume failed. Review the existing bridge before retrying." >&2
+          echo "  docker compose exec bridge node bridge_http_client.mjs resume ${account}" >&2
+          exit 1
         fi
       else
         echo "Pairing did not finish. Resume with:" >&2
-        echo "  docker compose exec bridge node --input-type=module -e 'fetch(\"http://127.0.0.1:${port}/accounts/${account}/resume\",{method:\"POST\"}).then(r=>process.exit(r.ok?0:1))'" >&2
+        echo "  docker compose exec bridge node bridge_http_client.mjs resume ${account}" >&2
       fi
     fi
     exit "$code"
   fi
 
-  if bridge_http "$port" health; then
+  if [ "$bridge_status" -eq 0 ]; then
     echo "A bridge is already listening on 127.0.0.1:${port}. Scan \`docker compose logs -f bridge\`, or stop the bridge before a one-shot pair." >&2
     exit 1
   fi

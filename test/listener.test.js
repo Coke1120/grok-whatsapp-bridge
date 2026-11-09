@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { parseAccessScopes, scopeForAccount } from '../access_scopes.js';
 import { classifyBridgeResponse, createInboxListener, listenerArtifactPaths } from '../listener.mjs';
 
 function jsonResponse(body, status = 200) {
@@ -14,8 +15,34 @@ function jsonResponse(body, status = 200) {
   };
 }
 
+test('listener requires a valid token before touching state or issuing requests', () => {
+  for (const apiToken of [undefined, '', 'short', 'private-token-with-whitespace ']) {
+    assert.throws(() => createInboxListener({ apiToken, statePath: '/no-such-state',
+      fetch() { assert.fail('Must not request without authentication'); } }), (error) => {
+      assert.match(error.message, /WHATSAPP_API_TOKEN/);
+      if (apiToken) assert.ok(!error.message.includes(apiToken));
+      return true;
+    });
+  }
+});
+
+test('legacy listener intake never authorizes an unscoped acknowledgement', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-unscoped-ack-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const calls = [];
+  const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001',
+    accounts: [{ name: 'default', allowedUsers: '111' }], defaultAck: 'Must not send',
+    inboxPath: path.join(dir, 'inbox'), statePath: path.join(dir, 'state'), unreadFlagPath: path.join(dir, 'flag'),
+    log() {}, warn() {}, fetch: async (url) => { calls.push(url); return jsonResponse([
+      { chatId: '111@s.whatsapp.net', senderId: '111@s.whatsapp.net', messageId: 'fixture', body: 'hello' },
+    ]); },
+  });
+  await listener.tick();
+  assert.deepEqual(calls, ['http://127.0.0.1:37100/messages']);
+});
+
 test('listener bridge URL defaults to 127.0.0.1:37100 when unset', () => {
-  const listener = createInboxListener({
+  const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001',
     accounts: [{ name: 'default', allowedUsers: '111' }],
     inboxPath: '/tmp/wa-default-port-inbox',
     statePath: '/tmp/wa-default-port-state',
@@ -52,7 +79,7 @@ test('single-account listener keeps the historical poll, inbox row, and webhook'
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-listener-'));
   const calls = [];
   try {
-    const listener = createInboxListener({
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001',
       bridge: 'http://127.0.0.1:37100',
       multi: false,
       accounts: [{ name: 'default', allowedUsers: '+111', programmaticAck: null, wakeWebhookUrl: null, wakeWebhookAuth: null }],
@@ -80,7 +107,7 @@ test('single-account listener keeps the historical poll, inbox row, and webhook'
     });
 
     const lines = [];
-    const started = createInboxListener({
+    const started = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001',
       bridge: 'http://127.0.0.1:37100',
       multi: false,
       accounts: [{ name: 'default', allowedUsers: '111', programmaticAck: null, wakeWebhookUrl: null, wakeWebhookAuth: null }],
@@ -103,6 +130,11 @@ test('single-account listener keeps the historical poll, inbox row, and webhook'
     const wake = calls.filter((call) => call.url === 'https://example.invalid/wake');
     assert.equal(wake.length, 1);
     assert.equal(wake[0].options.headers.Authorization, 'Bearer secret-token');
+    assert.doesNotMatch(JSON.stringify(wake[0]), /fixture-bridge-token/);
+    for (const poll of calls.filter((call) => call.url.endsWith('/messages'))) {
+      assert.equal(poll.options.headers.Authorization, 'Bearer fixture-bridge-token-not-a-secret-0001');
+      assert.equal(poll.options.redirect, 'error');
+    }
     const payload = JSON.parse(wake[0].options.body);
     assert.deepEqual(Object.keys(payload), ['source', 'messageId', 'deliveryId', 'chatId', 'senderId', 'senderName', 'body', 'hasMedia', 'ts']);
     assert.equal(payload.source, 'whatsapp-bridge-listener');
@@ -123,12 +155,13 @@ test('multi-account listener polls, wakes, and acks each account separately', as
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-listener-multi-'));
   const calls = [];
   try {
-    const listener = createInboxListener({
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001',
       bridge: 'http://127.0.0.1:37100',
       multi: true,
       accounts: [
         {
           name: 'ops',
+          accessScope: scopeForAccount(parseAccessScopes(JSON.stringify({ ops: { readChats: ['111@s.whatsapp.net'], triggerChats: ['111@s.whatsapp.net'], sendChats: ['111@s.whatsapp.net'] } })), 'ops'),
           allowedUsers: '111',
           programmaticAck: 'ack-ops',
           wakeWebhookUrl: 'https://example.invalid/ops',
@@ -157,6 +190,7 @@ test('multi-account listener polls, wakes, and acks each account separately', as
             chatId: '111@s.whatsapp.net',
             senderId: '111@s.whatsapp.net',
             senderName: 'Ops',
+            scopeVersion: 1, eventType: 'message', fromOwner: false,
             body: 'from-ops',
             hasMedia: false,
           }]);
@@ -189,6 +223,8 @@ test('multi-account listener polls, wakes, and acks each account separately', as
 
     const acks = calls.filter((call) => call.options?.method === 'POST' && String(call.url).endsWith('/send'));
     assert.equal(acks.length, 1);
+    assert.equal(acks[0].options.headers.Authorization, 'Bearer fixture-bridge-token-not-a-secret-0001');
+    assert.equal(acks[0].options.redirect, 'error');
     assert.equal(acks[0].url, 'http://127.0.0.1:37100/accounts/ops/send');
     assert.deepEqual(JSON.parse(acks[0].options.body), { chatId: '111@s.whatsapp.net', message: 'ack-ops' });
 
@@ -210,7 +246,7 @@ test('a non-allowlisted inbound is logged and does not wake', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-listener-drop-'));
   const calls = [];
   try {
-    const listener = createInboxListener({
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001',
       bridge: 'http://bridge',
       multi: false,
       accounts: [{ name: 'default', allowedUsers: '111', programmaticAck: 'ack', wakeWebhookUrl: null, wakeWebhookAuth: null }],
@@ -264,7 +300,7 @@ test('a reconnecting poll retries with short backoff, warns once, and keeps poll
   const sleeps = [];
   let polls = 0;
   try {
-    const listener = createInboxListener({
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001',
       bridge: 'http://bridge',
       multi: false,
       accounts: [{ name: 'default', allowedUsers: '111', programmaticAck: null, wakeWebhookUrl: null, wakeWebhookAuth: null }],
@@ -317,7 +353,7 @@ test('a hard poll error is not retried and a sibling account still drains', asyn
   const sleeps = [];
   const counts = { ops: 0, sales: 0 };
   try {
-    const listener = createInboxListener({
+    const listener = createInboxListener({ apiToken: 'fixture-bridge-token-not-a-secret-0001',
       bridge: 'http://bridge',
       multi: true,
       accounts: [

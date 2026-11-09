@@ -6,6 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+const API_TOKEN = 'synthetic-fixture-token-00000000000001';
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function freePort() {
@@ -15,7 +17,7 @@ function freePort() {
 function startBridge(args, env) {
   const child = spawn(process.execPath, ['bridge.js', ...args], {
     cwd: root,
-    env,
+    env: { ...env, WHATSAPP_API_TOKEN: env.WHATSAPP_API_TOKEN === '' ? '' : API_TOKEN },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -46,6 +48,7 @@ async function request(port, method, urlPath, { headers = {}, body } = {}) {
   const response = await fetch(`http://127.0.0.1:${port}${urlPath}`, {
     method,
     headers: {
+      Authorization: `Bearer ${API_TOKEN}`,
       ...headers,
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
     },
@@ -242,4 +245,20 @@ test('configured accounts are listed and selectable without changing the default
     await stopBridge(bridge.child);
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('missing API token exits before creating a session or listening', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-smoke-no-api-token-'));
+  const session = path.join(dir, 'session');
+  const bridge = startBridge(['--session', session, '--mode', 'bot'], singleEnv(dir, { WHATSAPP_API_TOKEN: '' }));
+  try {
+    const code = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('bridge startup did not fail closed')), 8000);
+      bridge.child.once('exit', (result) => { clearTimeout(timer); resolve(result); });
+    });
+    assert.equal(code, 1);
+    assert.match(bridge.output(), /WHATSAPP_API_TOKEN/);
+    const { existsSync } = await import('node:fs');
+    assert.equal(existsSync(session), false);
+  } finally { await stopBridge(bridge.child); rmSync(dir, { recursive: true, force: true }); }
 });

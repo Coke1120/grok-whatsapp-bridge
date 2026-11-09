@@ -22,6 +22,7 @@ const toolArgs = [
 function setup(scopes, extraEnv = {}, payload = { success: true }) {
   const calls = [];
   const env = {
+    WHATSAPP_API_TOKEN: 'fixture-bridge-token-not-a-secret-0001',
     WHATSAPP_BRIDGE_URL: BASE,
     WHATSAPP_SCOPES: JSON.stringify(scopes),
     WHATSAPP_MCP_SEND_ENABLED: '1',
@@ -330,15 +331,15 @@ test('scoped status exposes only selected account status and queue count, includ
   });
 });
 
-test('unset and empty scope settings preserve legacy routes and allowlist behavior', async () => {
+test('unset and empty scopes preserve legacy reads but deny sends', async () => {
   for (const value of [undefined, '', '   ']) {
     const x = setup({}, { WHATSAPP_SCOPES: value, WHATSAPP_MCP_ALLOWED_CHATS: DM });
     await x.tools.invoke('whatsapp_chat_info', { chatId: DM });
-    await x.tools.invoke('whatsapp_send_message', { chatId: DM, message: 'Fixture message' });
+    await assert.rejects(x.tools.invoke('whatsapp_send_message', { chatId: DM, message: 'Fixture message' }), /WHATSAPP_SCOPES/);
     await x.tools.invoke('whatsapp_status');
     await assert.rejects(x.tools.invoke('whatsapp_chat_info', { chatId: LID }), /WHATSAPP_MCP_ALLOWED_CHATS/);
     assert.deepEqual(x.calls.map(({ url }) => url), [
-      `${BASE}/chat/${encodeURIComponent(DM)}`, `${BASE}/send`, `${BASE}/health`,
+      `${BASE}/chat/${encodeURIComponent(DM)}`, `${BASE}/health`,
     ]);
   }
 });

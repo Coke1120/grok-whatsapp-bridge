@@ -1,4 +1,5 @@
 import { open } from 'node:fs/promises';
+import { bridgeAuthorizationHeaders } from '../api_auth.js';
 import {
   ACCOUNT_NAME_RE, CHAT_ID_RE, parseAccessScopes, scopeForAccount, canReadChat, canSendChat,
 } from '../access_scopes.js';
@@ -125,7 +126,7 @@ export function createWhatsAppTools({
   async function request(path, options = {}) {
     const response = await fetchImpl(base + path, {
       ...options,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...bridgeAuthorizationHeaders(env.WHATSAPP_API_TOKEN) },
       signal: AbortSignal.timeout(8000),
       redirect: 'error',
     });
@@ -217,6 +218,7 @@ export function createWhatsAppTools({
       }
       case 'whatsapp_send_message': {
         if (!sendEnabled) throw new Error('Sending is disabled. Set WHATSAPP_MCP_SEND_ENABLED=1 explicitly.');
+        if (scopes === null) throw new Error('Sending requires explicit WHATSAPP_SCOPES sendChats.');
         const account = selectAccount(args.account);
         assertChat(args.chatId, account, 'send');
         if (typeof args.message !== 'string' || !args.message.trim() || args.message.length > MAX_MESSAGE_LENGTH) {

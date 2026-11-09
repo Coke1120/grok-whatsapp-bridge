@@ -1,12 +1,13 @@
 # Docker and Synology
 
+> **Security migration:** the old v1.3.3 image is not fixed by setting a token. A green healthcheck does not prove the old image enforces authentication. Do not deploy this base pin as an upgrade; wait for an approved fixed published release. See [migration](api-security.md).
 > **Optional / legacy ops path. Not Primary.**
 >
 > Current Primary ops is the **Mac mini** with **Tailscale Serve** at `https://leos-mac-mini.tail48056.ts.net/`. `GET /health` there returns HTTP 200 when the process is up (`status: connected` once linked, or still waiting for a QR). The Synology / NAS bridge has been cleaned and is **not** in use as Primary. This page keeps the NAS Docker tutorial for that optional capability. Do not treat it as the deployment to run today. Mac mini setup is in the README section **Primary ops: Mac mini + Tailscale Serve**.
 
 The image runs the same `bridge.js` / `listener.mjs` as `./start.sh` and `./start-listener.sh`. Bare metal (the Mac mini) keeps using those scripts. Docker does not replace them. `Dockerfile` is the image source of truth. GitHub Actions builds it. A NAS that still runs this optional path pulls the result.
 
-**Never publish the bridge to the open internet.** The HTTP API has no authentication. The default compose file binds `127.0.0.1` on the host. Do not change that to `37100:37100` or `0.0.0.0:37100:37100`, do not forward the port on the router, do not put it behind Web Station or a public reverse proxy, and do not use Tailscale Funnel. Reach it from the NAS itself, an SSH tunnel, or Tailscale Serve to loopback. See [ADR 0002](adr/0002-docker-loopback-publish.md) and [ADR 0003](adr/0003-ghcr-pull-not-nas-build.md).
+**Never publish the bridge to the open internet.** Current source requires a shared API token on every route; legacy v1.3.3 does not implement it. The default compose file binds `127.0.0.1` on the host. Do not change that to `37100:37100` or `0.0.0.0:37100:37100`, do not forward the port on the router, do not put it behind Web Station or a public reverse proxy, and do not use Tailscale Funnel. Reach it from the NAS itself, an SSH tunnel, or Tailscale Serve to loopback. See [ADR 0002](adr/0002-docker-loopback-publish.md) and [ADR 0003](adr/0003-ghcr-pull-not-nas-build.md).
 
 On the default Compose bridge network the process listens on `0.0.0.0` **inside the container** so Docker's port mapping can connect. Requests still need a loopback `Host` (`127.0.0.1` or `localhost`), or a name listed in `WHATSAPP_TRUSTED_HOSTS`. A LAN IP or a public name in the `Host` header gets HTTP 400.
 
@@ -105,7 +106,7 @@ chmod 600 .env
 docker compose pull
 docker compose up -d
 docker compose logs -f bridge          # first-time QR
-curl -sS http://127.0.0.1:37100/health
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS http://127.0.0.1:37100/health
 ```
 
 Do not add `--build`.
@@ -139,7 +140,7 @@ DSM 7.2+ with Container Manager. The NAS needs outbound internet to **pull** `gh
    ```
 
 9. Open the bridge container log, or from SSH: `sudo docker compose logs -f bridge`. Scan the QR (WhatsApp → Linked devices). A log that only repeats `Connection closed (reason: 408)` and never prints a QR means the container WebSocket to WhatsApp is failing. See [No QR, only 408](#no-qr-only-408).
-10. On the NAS, over SSH: `curl -sS http://127.0.0.1:37100/health`. `status` stays `disconnected` or `connecting` until the scan finishes. HTTP 200 from `/health` means the process is up, not that WhatsApp is linked.
+10. On the NAS, over SSH: `printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS http://127.0.0.1:37100/health`. `status` stays `disconnected` or `connecting` until the scan finishes. HTTP 200 from `/health` means the process is up, not that WhatsApp is linked.
 11. Container Manager → **Volume**. Keep `grok-whatsapp-bridge_wa-session` and `grok-whatsapp-bridge_wa-sessions`. Deleting them deletes the WhatsApp login. Pulling a new image does not.
 
 Older DSM builds may only have the `docker-compose` command (with a hyphen). Use whichever one is installed. A plain Project start does **not** pass `--profile listener`.
@@ -154,7 +155,7 @@ sudo docker compose --profile listener up -d
 sudo docker compose logs -f listener
 ```
 
-No `--build`. The listener log should show `bridge=http://bridge:37100`. If the NAS can `curl http://127.0.0.1:37100/health` and the listener still logs `fetch failed`, the host is dropping packets between containers on the project network. Container Manager allows that traffic by default. If the bridge container itself cannot resolve WhatsApp, that is the next section, not a listener bug.
+No `--build`. The listener log should show `bridge=http://bridge:37100`. If the NAS can `printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- http://127.0.0.1:37100/health` and the listener still logs `fetch failed`, the host is dropping packets between containers on the project network. Container Manager allows that traffic by default. If the bridge container itself cannot resolve WhatsApp, that is the next section, not a listener bug.
 
 To start the listener from the Container Manager project screen, edit the project YAML and delete the listener service's `profiles:` line. Do not switch the project to a build. The one-shot `pair` service is different: it joins the bridge container's network namespace so it can pause that account on `127.0.0.1`. Run it only while that bridge container is the one currently running.
 
@@ -166,7 +167,7 @@ From a laptop, the NAS loopback is not your loopback. Two ways in:
 
 ```bash
 ssh -L 37100:127.0.0.1:37100 user@nas
-curl -sS http://127.0.0.1:37100/health
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS http://127.0.0.1:37100/health
 ```
 
 **Tailscale Serve** (tailnet only). Primary Serve runs on the Mac mini (`tailscale serve --bg 37100` → `https://leos-mac-mini.tail48056.ts.net/`). The commands below are the optional NAS path, with the Tailscale package or container on the NAS:
@@ -308,7 +309,7 @@ On this NAS the bridge network itself has been the break: the container logs `EA
 While the log is looping, check the bridge on the NAS:
 
 ```bash
-curl -sS http://127.0.0.1:37100/health
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS http://127.0.0.1:37100/health
 ```
 
 HTTP 200 with `"status":"disconnected"` or `"connecting"` means Node is up and WhatsApp is not linked yet. `"connected"` appears after a successful link. The image healthcheck treats that HTTP 200 as healthy, so this loop does not recreate the container.

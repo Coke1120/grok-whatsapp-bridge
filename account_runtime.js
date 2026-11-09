@@ -172,8 +172,9 @@ export function createAccountRuntime(options) {
   }
 
   function sendWithTimeout(chatId, payload, sendOptions = {}, timeoutMs = sendTimeoutMs) {
-    if (accessScope !== null && !canSendChat(accessScope, chatId)) {
-      return Promise.reject(Object.assign(new Error('Destination is outside this account send scope.'), { status: 403 }));
+    const denied = denySend(chatId);
+    if (denied) {
+      return Promise.reject(Object.assign(new Error(denied.body.error), { status: 403 }));
     }
     let timer;
     const timeoutPromise = new Promise((_, reject) => {
@@ -239,7 +240,10 @@ export function createAccountRuntime(options) {
   }
 
   function denySend(chatId) {
-    return accessScope !== null && !canSendChat(accessScope, chatId)
+    if (accessScope === null) {
+      return { status: 403, body: { error: 'Outgoing operations require an explicit WHATSAPP_SCOPES send policy.' } };
+    }
+    return !canSendChat(accessScope, chatId)
       ? { status: 403, body: { error: 'Destination is outside this account send scope.' } } : null;
   }
 

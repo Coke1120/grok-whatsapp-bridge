@@ -9,6 +9,17 @@ description: >-
 ---
 # WhatsApp Baileys bridge + programmatic listener + webhook wake
 
+**Security migration:** current source requires `WHATSAPP_API_TOKEN` on every
+REST route, including `/health`, and explicit account `WHATSAPP_SCOPES.sendChats`
+for every outgoing chat effect. A legacy allowlist does not grant sending.
+Obtain separate approval before generating/storing a real credential, deploying,
+restarting services or changing scopes. See `docs/api-security.md`. Never copy
+fixture tokens into deployment or pass API credentials to webhook receivers.
+For local health/control checks, use `node bridge_http_client.mjs health` (or
+`pause <account>` / `resume <account>`) with the token already loaded in the
+environment. It prints no health body; exit 0 means HTTP success. Error 1 is not
+a stopped bridge. Only exit 2 proves a refused connection in this namespace.
+
 Grok WhatsApp Bridge: a Baileys HTTP API. **Primary = Mac mini.** Reach it via Mac localhost or Tailscale Serve — never the public internet. Upstream MIT code lives in NousResearch/hermes-agent `scripts/whatsapp-bridge`.
 
 A git checkout at `/workspace/whatsapp-bridge` (or wherever this repo is cloned) is source. It is not a running bridge.
@@ -27,9 +38,9 @@ A git checkout at `/workspace/whatsapp-bridge` (or wherever this repo is cloned)
 
 **`/send` prefers Mac localhost.** When the shell is on the Mac, `POST http://127.0.0.1:37100/send`. From the Box, you may try Mac Serve `https://leos-mac-mini.tail48056.ts.net` with a client timeout of **at most 3 seconds**. If it does not answer, stop and report that. Do not fall back to starting a bridge.
 
-## Architecture (token model)
+## Architecture (LLM token model)
 
-| Layer | What | Tokens |
+| Layer | What | LLM tokens |
 |-------|------|--------|
 | `bridge.js` | Baileys session + `/health` `/send` `/messages` | none |
 | `listener.mjs` | Poll `/messages`, allowlist, `inbox.jsonl`, optional fixed ack, **POST webhook** | none |
@@ -61,15 +72,15 @@ cp .env.example .env
 npm ci
 ./pair.sh              # QR → Linked Devices
 ./start.sh             # nohup/tmux/systemd
-curl -sS http://127.0.0.1:37100/health   # process up; connected or waiting for QR
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS http://127.0.0.1:37100/health   # process up; connected or waiting for QR
 tailscale serve --bg 37100               # tailnet HTTPS → 127.0.0.1:37100
-curl -sS --max-time 3 https://leos-mac-mini.tail48056.ts.net/health
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS --max-time 3 https://leos-mac-mini.tail48056.ts.net/health
 nohup ./start-listener.sh > /tmp/wa-listener.log 2>&1 &
 ```
 
 `start-listener.sh` must **not** `source .env` with bare bash if values contain spaces — parse quoted `.env` (python + `shlex.quote`) then `exec node listener.mjs`.
 
-Docker on Synology is optional / legacy, not Primary. The NAS bridge has been cleaned. The image pull pin in `docker-compose.yml` stays `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.3` (no `build:`). Do not `docker compose build` or `up --build` on Synology or in Portainer. `Dockerfile` is built in GitHub Actions; `./start.sh` and `./pair.sh` stay the Mac mini path. Publish `127.0.0.1:37100` only. Never Funnel and never a public bind. If bridge-network DNS/egress dies (`EAI_AGAIN`, no QR), use `docker-compose.host-net.yml` (`network_mode: host`, `WHATSAPP_BIND_HOST=127.0.0.1`) — that overlay is not the default. `WHATSAPP_TRUSTED_HOSTS` defaults to `bridge` in Compose and must include the Serve MagicDNS name when Serve sends that `Host`. Primary name: `leos-mac-mini.tail48056.ts.net`. Older NAS example: `leohofamily.tail48056.ts.net`. Session state is the `wa-session` / `wa-sessions` volumes; do not delete them on upgrade. Details: `docs/docker-synology.md`.
+Docker on Synology is optional / legacy, not Primary. The NAS bridge has been cleaned. The image pull pin in `docker-compose.yml` stays `ghcr.io/coke1120/grok-whatsapp-bridge:v1.3.3` (no `build:`). That legacy image lacks this security fix; setting a token or getting a green healthcheck does not add authentication. Do not `docker compose build` or `up --build` on Synology or in Portainer. `Dockerfile` is built in GitHub Actions; `./start.sh` and `./pair.sh` stay the Mac mini path. Publish `127.0.0.1:37100` only. Never Funnel and never a public bind. If bridge-network DNS/egress dies (`EAI_AGAIN`, no QR), use `docker-compose.host-net.yml` (`network_mode: host`, `WHATSAPP_BIND_HOST=127.0.0.1`) — that overlay is not the default. `WHATSAPP_TRUSTED_HOSTS` defaults to `bridge` in Compose and must include the Serve MagicDNS name when Serve sends that `Host`. Primary name: `leos-mac-mini.tail48056.ts.net`. Older NAS example: `leohofamily.tail48056.ts.net`. Session state is the `wa-session` / `wa-sessions` volumes; do not delete them on upgrade. Details: `docs/docker-synology.md`.
 
 ## .env keys
 
@@ -143,9 +154,9 @@ Give the existing `./session` directory to the default account (`default` in the
 ```bash
 ./pair.sh sales
 ./start.sh
-curl -sS http://127.0.0.1:37100/health
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS http://127.0.0.1:37100/health
 # status/session describe the default account; accounts[] lists each status
-curl -sS -X POST http://127.0.0.1:37100/accounts/sales/send \
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS -X POST http://127.0.0.1:37100/accounts/sales/send \
   -H 'content-type: application/json' \
   -d '{"chatId":"<jid from inbox>","message":"hi"}'
 ```
@@ -173,9 +184,9 @@ Per-account allowlist: `allowedUsers` / `WHATSAPP_ALLOWED_USERS` on that account
 Re-pair without logout (bridge already running):
 
 ```bash
-curl -sS -X POST http://127.0.0.1:37100/accounts/sales/pause
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS -X POST http://127.0.0.1:37100/accounts/sales/pause
 ./pair.sh sales
-curl -sS -X POST http://127.0.0.1:37100/accounts/sales/resume
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS -X POST http://127.0.0.1:37100/accounts/sales/resume
 ```
 
 Single-session `./logout.sh` still ends the bridge process after unlink. Multi-account `loggedOut` does not. Do not `rm -rf session` when only one named account needs a new QR.
@@ -197,8 +208,8 @@ Ask the user to unlink the old device in WhatsApp → Linked Devices if it still
 ## Health checklist
 
 - On the Mac: `pgrep -af 'bridge.js|listener.mjs'`
-- Prefer `curl -sS --max-time 3 http://127.0.0.1:37100/health` on the Mac
-- From the Box: `curl -sS --max-time 3 https://leos-mac-mini.tail48056.ts.net/health`, then stop. Do not start the bridge
+- Prefer `printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS --max-time 3 http://127.0.0.1:37100/health` on the Mac
+- From the Box: `printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS --max-time 3 https://leos-mac-mini.tail48056.ts.net/health`, then stop. Do not start the bridge
 - On the Mac, tail `/tmp/wa-bridge.log`, `/tmp/wa-listener.log` (look for `wake 200` vs `401`)
 - Latest `inbox.jsonl` on the Mac
 
@@ -210,5 +221,5 @@ Ship source + `package.json` + scripts + skill copy; **omit** `session/`, `node_
 
 - Meta WhatsApp Business Cloud API
 - Agent gateway config edits
-- Public unauthenticated exposure of the Baileys port
+- Public exposure of the Baileys port, even when API authentication is enabled
 - Cron polling WhatsApp for wakes

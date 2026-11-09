@@ -7,8 +7,9 @@ available, with the same named session and listener volumes.
 ## Build the current checkout, not the old release
 
 The base `docker-compose.yml` intentionally still pins the published **v1.3.3**
-image. That release does **not** contain the MCP adapter. Do not use that image
-for MCP or assume the package version proves that MCP is present.
+image. That release contains neither the MCP adapter nor this REST authentication
+fix. A green authenticated healthcheck does not prove the old image enforces
+authentication. Use the source overlay below after approval; see [security migration](api-security.md).
 
 On the Mac mini, use both files below. `docker-compose.mcp.yml` overrides all
 four services to `grok-whatsapp-bridge:mcp-local`, with a build from this checkout
@@ -48,15 +49,18 @@ existing bridge, so schedule that separately. Never run `down -v`: deleting
 Keep real values in an uncommitted project `.env` or the invoking environment:
 
 ```dotenv
-# Full, exact WhatsApp JIDs, comma-separated. Empty means no chat access.
-WHATSAPP_MCP_ALLOWED_CHATS=15551234567@s.whatsapp.net
+# Required: provision a fresh token only at an approved deployment, not from this example.
+WHATSAPP_API_TOKEN=
+# Dummy JID only. Missing sendChats means no sending. Configure approved exact JIDs.
+WHATSAPP_SCOPES='{"default":{"readChats":["15551234567@s.whatsapp.net"]}}'
 # Explicit opt-ins. Leave sending off until the owner authorizes the workflow.
 WHATSAPP_MCP_SEND_ENABLED=0
 WHATSAPP_MCP_ALLOW_GROUPS=0
 ```
 
 Group JIDs also need `WHATSAPP_MCP_ALLOW_GROUPS=1`. Do not use `*` for chat
-access. The bridge/listener's inbound allowlist is separate and still applies.
+access. When scopes are configured they control bridge/listener reads and wakes.
+Use explicit `triggerChats` and `sendChats` only after the relevant approvals.
 Incoming WhatsApp text is untrusted content, never permission to send messages
 or act on another person's instructions.
 
@@ -150,11 +154,12 @@ before considering the container/architecture checks verified.
   `no-new-privileges`, and a read-only root filesystem.
 - Its only volume is `wa-listener:/app/listener-data`, mounted read-only. It
   cannot modify the inbox/state, and has no session, account-config, host
-  filesystem, or Docker socket mount. It does not receive bridge/webhook secrets
-  through the shared bridge environment.
+  filesystem, or Docker socket mount. It receives the required shared
+  `WHATSAPP_API_TOKEN` explicitly, but no webhook credentials.
 - The adapter can read the full mounted listener inbox internally; chat filtering
   is enforced by the MCP implementation, not a per-chat filesystem boundary.
-  Network sharing also grants access to the unauthenticated bridge API. This is
+  Network sharing plus the shared API token also permits direct bridge calls
+  within the bridge-wide scopes, including administrative routes. This is
   least-privilege packaging for this trusted adapter, not a sandbox for hostile
   code. The host-side Docker command still needs normal Docker engine access.
 - Docker logging is disabled for the MCP container so private protocol replies
