@@ -24,3 +24,7 @@ compose.override.yml
 
 # Atomic listener state temporary files may contain private event payloads.
 listener-state.json.*.tmp
+
+# Private history snapshots must never enter image build contexts.
+**/conversation-history.json
+**/.conversation-history.*.tmp

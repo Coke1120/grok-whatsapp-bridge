@@ -7,6 +7,7 @@ import {
   decryptPollVote,
   getKeyAuthor,
   jidNormalizedUser,
+  proto,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import pino from 'pino';
@@ -20,6 +21,7 @@ import { matchesAllowedSender, matchesAllowedUser, matchesInboundWhatsAppGroup, 
 import { createOutboundIdTracker } from './outbound_ids.js';
 import { classifyOwnerMessageGate } from './owner_message_gate.js';
 import { canReadChat, canSendChat } from './access_scopes.js';
+import { createConversationHistory } from './conversation_history.js';
 import {
   addMentions,
   buildPollPayload,
@@ -76,6 +78,7 @@ export function createAccountRuntime(options) {
     forwardOwnerMessages = false,
     sendReadReceipts = false,
     accessScope = null,
+    historyBackfillEnabled = false,
     maxMessageLength = 4096,
     chunkDelayMs = 300,
     sendTimeoutMs = 60000,
@@ -119,6 +122,39 @@ export function createAccountRuntime(options) {
   }
 
   mkdirSync(sessionDir, { recursive: true });
+
+  // Scope opt-in is required for durable history; pairing and legacy intake
+  // must not create a new archive implicitly. Each session owns its own file.
+  const history = accessScope !== null && !pairOnly ? createConversationHistory({
+    account: name, filePath: path.join(sessionDir, 'conversation-history.json'), canRead: canReadScopedChat,
+  }) : null;
+  let historyRequestAt = 0;
+  let historyRequestPending = false;
+
+  function cacheHistory(messages = [], chats = [], historical = false) {
+    if (!history) return;
+    // Mark the complete batch before the first write: a failed partial flush
+    // must not let its unprocessed tail masquerade as fresh notifications.
+    if (historical) for (const msg of messages) history.markHistoricalKey(msg?.key);
+    let writeFailed = false;
+    const flushHistory = () => { try { history.flush(); } catch { writeFailed = true; } };
+    try {
+      for (const chat of chats) history.rememberChat(chat);
+      for (let i = 0; i < messages.length; i += 1) {
+        const msg = messages[i];
+        const revoked = getMessageContent(msg)?.protocolMessage;
+        if (msg?.message === null && msg.messageStubType === proto.WebMessageInfo.StubType.REVOKE) {
+          history.remove([msg.key]);
+        } else if (revoked?.type === proto.Message.ProtocolMessage.Type.REVOKE && revoked.key
+            && (!revoked.key.remoteJid || revoked.key.remoteJid === msg.key?.remoteJid)) {
+          history.remove([{ ...revoked.key, remoteJid: msg.key?.remoteJid }]);
+        } else history.remember(msg, { historical });
+        if (i % 100 === 99) flushHistory();
+      }
+      flushHistory();
+    } catch { writeFailed = true; }
+    if (writeFailed) warn('[bridge] conversation cache could not be updated; durable history may be stale.');
+  }
 
   const messageQueue = [];
   const recentlySentIds = createOutboundIdTracker(512);
@@ -216,6 +252,10 @@ export function createAccountRuntime(options) {
 
   function rememberSentMessage(sent, payload, chatId) {
     if (!sent?.key?.id) return;
+    // Own outgoing messages are history too, but only where reading was granted.
+    cacheHistory([{ ...sent, key: { ...sent.key, remoteJid: sent.key.remoteJid || chatId, fromMe: true },
+      messageTimestamp: sent.messageTimestamp,
+      message: sent.message || (typeof payload.text === 'string' ? { conversation: payload.text } : undefined) }]);
     // Keep the known destination even when a transport response omits it, so
     // later poll aggregation cannot treat an ID as cross-chat authority.
     if (accessScope !== null && !sent.key.remoteJid) sent = { ...sent, key: { ...sent.key, remoteJid: chatId } };
@@ -402,10 +442,29 @@ export function createAccountRuntime(options) {
       }
     });
 
+    // Sync/append input never enters the live queue, receipt path or listener.
+    // It can enrich the cache without gaining trigger/send authority.
+    created.ev.on('messaging-history.set', ({ messages = [], chats = [], syncType }) => {
+      if (syncType === proto.HistorySync.HistorySyncType.FULL) return;
+      if (sock === created) cacheHistory(messages, chats, true);
+    });
+    for (const event of ['chats.upsert', 'chats.update']) {
+      created.ev.on(event, (chats = []) => { if (sock === created) cacheHistory([], chats); });
+    }
+    created.ev.on('messages.delete', (payload = {}) => {
+      if (sock !== created || !history) return;
+      history.remove(payload.keys || [], payload.all ? payload.jid : undefined);
+      try { history.flush(); } catch { warn('[bridge] conversation cache deletion could not be persisted.'); }
+    });
+
     created.ev.on('messages.update', async (updates) => {
       if (sock !== created) return;
       for (const { key, update } of updates || []) {
         if (sock !== created) return;
+        if (update?.message === null && update.messageStubType === proto.WebMessageInfo.StubType.REVOKE) {
+          history?.remove([key]);
+          try { history?.flush(); } catch { warn('[bridge] conversation cache revocation could not be persisted.'); }
+        } else if (update?.message) cacheHistory([{ ...update, key }]);
         if (!update?.pollUpdates) continue;
         // Poll-update events take a separate path from messages.upsert. Apply
         // the same read ceiling before aggregation, diagnostic logs or cache.
@@ -465,6 +524,12 @@ export function createAccountRuntime(options) {
     created.ev.on('messages.upsert', async ({ messages, type }) => {
       if (sock !== created) return;
       if (type !== 'notify' && type !== 'append') return;
+      const previouslyCached = new Set(messages.filter((msg) => history?.has(msg?.key?.remoteJid, msg?.key?.id))
+        .map((msg) => `${msg.key.remoteJid}:${msg.key.id}`));
+      cacheHistory(messages, [], type === 'append');
+      // Append is catch-up, not evidence of a newly received message. It must
+      // never trigger automatic replies or acknowledgments, including legacy mode.
+      if (type === 'append') return;
 
       const botIds = Array.from(new Set([
         normalizeWhatsAppId(created.user?.id),
@@ -473,7 +538,8 @@ export function createAccountRuntime(options) {
 
       for (const msg of messages) {
         if (sock !== created) return;
-        if (!msg.message) continue;
+        if (!msg.message || previouslyCached.has(`${msg.key?.remoteJid}:${msg.key?.id}`)) continue;
+        if (accessScope !== null && (typeof msg.key?.id !== 'string' || !msg.key.id || msg.key.id.length > 256)) continue;
 
         const chatId = msg.key.remoteJid;
         const senderId = msg.key.participant || chatId;
@@ -741,6 +807,7 @@ export function createAccountRuntime(options) {
       printQRInTerminal: false,
       browser: ['WhatsApp Bridge', 'Chrome', '120.0'],
       syncFullHistory: false,
+      shouldSyncHistoryMessage: ({ syncType } = {}) => history !== null && syncType !== proto.HistorySync.HistorySyncType.FULL,
       markOnlineOnConnect: false,
       getMessage: async () => ({ conversation: '' }),
     });
@@ -856,7 +923,7 @@ export function createAccountRuntime(options) {
         });
         const sent = await sendWithTimeout(chatId, payload, sendOptions);
         trackSentMessageId(sent);
-        messageStore.remember(sent);
+        rememberSentMessage(sent, payload, chatId);
         if (sent?.key?.id) messageIds.push(sent.key.id);
         if (chunks.length > 1 && i < chunks.length - 1) await sleep(chunkDelayMs);
       }
@@ -883,8 +950,10 @@ export function createAccountRuntime(options) {
       await sendWithTimeout(chatId, { text: chunks[0], edit: key });
       if (chunks.length > 1) {
         for (let i = 1; i < chunks.length; i += 1) {
-          const sent = await sendWithTimeout(chatId, { text: chunks[i] });
+          const payload = { text: chunks[i] };
+          const sent = await sendWithTimeout(chatId, payload);
           trackSentMessageId(sent);
+          rememberSentMessage(sent, payload, chatId);
           if (sent?.key?.id) messageIds.push(sent.key.id);
           if (i < chunks.length - 1) await sleep(chunkDelayMs);
         }
@@ -975,7 +1044,7 @@ export function createAccountRuntime(options) {
       msgPayload = addMentions(msgPayload, mentions);
       const sent = await sendWithTimeout(chatId, msgPayload);
       trackSentMessageId(sent);
-      messageStore.remember(sent);
+      rememberSentMessage(sent, msgPayload, chatId);
       return { status: 200, body: { success: true, messageId: sent?.key?.id } };
     } catch (err) {
       return { status: 500, body: { error: err.message } };
@@ -1048,6 +1117,61 @@ export function createAccountRuntime(options) {
     }
   }
 
+  function requireHistory(chatId) {
+    if (!history) return { status: 403, body: { error: 'History requires explicit WHATSAPP_SCOPES read access.' } };
+    if (chatId !== undefined && !canReadScopedChat(chatId)) {
+      return { status: 403, body: { error: 'Chat is outside this account read scope.' } };
+    }
+    return null;
+  }
+
+  function listChats(options = {}) {
+    const denied = requireHistory(); if (denied) return denied;
+    return { status: 200, body: history.listChats(options) };
+  }
+
+  function chatMessages(chatId, options = {}) {
+    const denied = requireHistory(chatId); if (denied) return denied;
+    return { status: 200, body: history.messages(chatId, options) };
+  }
+
+  async function requestHistory(chatId, body = {}) {
+    const denied = requireHistory(chatId); if (denied) return denied;
+    if (!historyBackfillEnabled) return { status: 403, body: { error: 'History backfill is disabled; enable it only with separate owner approval.' } };
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return { status: 400, body: { error: 'History request must be an object.' } };
+    const count = body.count ?? 20;
+    if (!Number.isInteger(count) || count < 1 || count > 50 || Object.keys(body).some((key) => key !== 'count')) {
+      return { status: 400, body: { error: 'Only count (1..50) is accepted; anchors are selected from this account cache.' } };
+    }
+    if (!sock || connectionState !== 'connected' || typeof sock.fetchMessageHistory !== 'function') {
+      return notConnected('Provider history requests are unavailable while disconnected or unsupported.');
+    }
+    const anchor = history.oldest(chatId);
+    if (!anchor) return { status: 409, body: { error: 'A cached message with a provider timestamp is required as the history anchor.' } };
+    if (historyRequestPending || Date.now() - historyRequestAt < 60000) {
+      return { status: 429, body: { error: 'Wait at least 60 seconds between history requests for this account.' } };
+    }
+    historyRequestAt = Date.now();
+    historyRequestPending = true;
+    const current = sock;
+    let timer;
+    try {
+      // rc13's own example passes the original messageTimestamp unchanged,
+      // despite the wire field's Ms name. No full-sync/re-pair workaround.
+      const transport = Promise.resolve().then(() => current.fetchMessageHistory(count, { ...anchor.key }, anchor.timestamp));
+      transport.then(() => { historyRequestPending = false; }, () => { historyRequestPending = false; });
+      const requestId = await Promise.race([
+        transport,
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), 5000); }),
+      ]);
+      if (sock !== current || typeof requestId !== 'string' || !requestId || requestId.length > 256) throw new Error('uncertain');
+      return { status: 202, body: { requested: true, requestId, chatId, count,
+        complete: false, source: 'provider-request', status: 'requested' } };
+    } catch {
+      return { status: 503, body: { error: 'History request outcome is uncertain; do not retry automatically. The cache may update later.' } };
+    } finally { clearTimeout(timer); }
+  }
+
   async function chatInfo(chatId) {
     if (accessScope !== null && !canReadScopedChat(chatId)) {
       return { status: 403, body: { error: 'Chat is outside this account read scope.' } };
@@ -1093,5 +1217,8 @@ export function createAccountRuntime(options) {
     typing,
     markRead,
     chatInfo,
+    listChats,
+    chatMessages,
+    requestHistory,
   };
 }

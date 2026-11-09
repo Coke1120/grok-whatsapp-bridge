@@ -211,6 +211,33 @@ export function createBridgeApp({
       });
     }
 
+    for (const [route, fnName, argsFor] of [
+      ['/chats', 'listChats', (req) => [req.query]],
+      ['/chat/:id/messages', 'chatMessages', (req) => [req.params.id, req.query]],
+    ]) {
+      app.get(`${prefix}${route}`, async (req, res) => {
+        const account = resolveAccount(req, res);
+        if (!account) return;
+        try {
+          const result = await account[fnName](...argsFor(req));
+          sendJson(res, result.status || 200, result.body, account);
+        } catch (err) {
+          sendJson(res, err.status || 500, { error: err.message || 'Internal error' }, account);
+        }
+      });
+    }
+
+    app.post(`${prefix}/chat/:id/history`, async (req, res) => {
+      const account = resolveAccount(req, res);
+      if (!account) return;
+      try {
+        const result = await account.requestHistory(req.params.id, req.body);
+        sendJson(res, result.status || 200, result.body, account);
+      } catch (err) {
+        sendJson(res, err.status || 500, { error: err.message || 'Internal error' }, account);
+      }
+    });
+
     app.get(`${prefix}/chat/:id`, async (req, res) => {
       const account = resolveAccount(req, res);
       if (!account) return;
