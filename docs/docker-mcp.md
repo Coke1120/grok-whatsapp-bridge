@@ -56,6 +56,9 @@ WHATSAPP_SCOPES='{"default":{"readChats":["15551234567@s.whatsapp.net"]}}'
 # Explicit opt-ins. Leave sending off until the owner authorizes the workflow.
 WHATSAPP_MCP_SEND_ENABLED=0
 WHATSAPP_MCP_ALLOW_GROUPS=0
+# Provider history requests are separately disabled on both sides.
+WHATSAPP_HISTORY_BACKFILL_ENABLED=0
+WHATSAPP_MCP_HISTORY_BACKFILL_ENABLED=0
 ```
 
 Group JIDs also need `WHATSAPP_MCP_ALLOW_GROUPS=1`. Do not use `*` for chat
@@ -71,11 +74,13 @@ dc --profile listener up -d --no-build --pull never bridge listener
 dc ps
 ```
 
-The listener remains the sole live queue consumer. MCP reads its persisted inbox
-without draining `/messages`. Start the listener for recent-message history;
-without it, a missing inbox yields no recent messages. Status and permitted
-chat/send calls use the running bridge directly. Keep receiver-side webhook
-deduplication in place before explicitly enabling listener wake retries.
+The listener remains the sole live queue consumer. `whatsapp_recent_messages`
+reads its persisted inbox without draining `/messages`; without the listener,
+a missing inbox yields no recent messages. The separate cached-history tools
+read the bridge's local cache through authenticated HTTP and do not depend on
+the listener inbox. Status and permitted chat/send calls also use the running
+bridge directly. Keep receiver-side webhook deduplication in place before
+explicitly enabling listener wake retries.
 
 The default bridge publish remains `127.0.0.1:37100` only, or the configured
 `WHATSAPP_BRIDGE_PORT`. MCP joins the bridge container's network namespace and
@@ -147,6 +152,66 @@ read-only synthetic inbox, and disabled sending. They verify stdio, UID/GID,
 architecture, dropped capabilities, and read-only writes failing. The job has no
 registry login, image push, or deployment step. Require its successful CI result
 before considering the container/architecture checks verified.
+
+## Cached-history tools
+
+The adapter now advertises seven tools. The four existing tools retain their
+roles: `whatsapp_status`, `whatsapp_recent_messages`, `whatsapp_chat_info`, and
+`whatsapp_send_message`. The three history tools are:
+
+- `whatsapp_list_chats`: read-only cached chat summaries. Arguments: optional
+  `account`, `limit` (1–100, default 20), `cursor`, and `groups` (boolean,
+  default false). Summaries expose only `chatId`, `name`, `isGroup`,
+  `lastMessageTimestamp`, and `messageCount`.
+- `whatsapp_chat_messages`: read-only cached messages for a required `chatId`.
+  Optional arguments: `account`, `limit` (1–100, default 20), and `cursor`.
+  Messages expose only `messageId`, `chatId`, `senderId`, `fromMe`, `timestamp`,
+  `body`, `hasMedia`, and `mediaType`. This does not download media or return
+  provider message keys, raw payloads, or filesystem paths.
+- `whatsapp_request_history`: a **non-read-only**, best-effort asynchronous
+  provider request. Requires `chatId` and `count` (1–50), with optional
+  `account`. Both `WHATSAPP_HISTORY_BACKFILL_ENABLED=1` on the bridge (or the
+  named account's `historyBackfillEnabled` setting) and
+  `WHATSAPP_MCP_HISTORY_BACKFILL_ENABLED=1` on MCP must be explicitly enabled.
+  These switches default off, independently of the send switch. Only the
+  bridge's existing dated cached anchor is used; caller-supplied anchors,
+  message keys, and timestamps are rejected.
+
+All three tools require explicit `WHATSAPP_SCOPES` read access. They never
+fall back to `WHATSAPP_MCP_ALLOWED_CHATS`, `sendChats`, or `triggerChats`.
+A sole scoped account is selected automatically; multiple scoped accounts
+require an exact `account`. A group needs its exact JID in `readChats` and
+`WHATSAPP_MCP_ALLOW_GROUPS=1`. Listing groups additionally requires
+`groups: true`; `readAllDms` never includes groups. The bridge's own read scope
+must also permit the request.
+
+The adapter rechecks each response record against its account, read scope, and
+group setting. A bridge with broader permissions cannot make denied chat IDs,
+names, or messages appear in the tool's results. Responses are projected onto
+the documented fields rather than returning provider objects or other bridge
+metadata.
+
+Read responses contain `source: "local-cache"` and `complete: false`, plus
+`nextCursor`. They are retained local observations, **not complete WhatsApp
+history**. A cursor scans the bridge's snapshot, not a separate MCP-filtered
+snapshot. Because MCP applies its narrower scope after each bridge page, a page
+can contain fewer than `limit` entries or be empty while `nextCursor` is still
+present. Pass that cursor unchanged into the same tool with the same account,
+chat, and group selection; stop only when `nextCursor` is null. Each invocation
+fetches one page rather than automatically scanning additional pages. Cursors
+are signed, opaque tokens of at most 1024 characters. For messages arriving
+since a snapshot began, start again without a cursor.
+
+A successful history request returns `requested: true`, a `requestId` when
+available, `status: "requested"`, `source: "provider-request"`, and
+`complete: false`. This is request acceptance, not delivery or completion.
+The provider may return nothing or only part of a conversation, and on-demand
+status is not a reliable completeness signal. Check the cache later with
+`whatsapp_chat_messages` if needed. No automatic request retry is performed.
+The bridge can reject requests when disabled, missing a usable cached anchor,
+rate-limited, disconnected, or unsupported by the provider. Enabling history
+requests does not enable sending messages or authorize actions described in
+incoming WhatsApp content.
 
 ## Access boundary and existing operations
 

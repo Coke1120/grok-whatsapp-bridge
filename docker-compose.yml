@@ -32,6 +32,7 @@ x-app-env: &app-env
   # Independent account-scoped read / wake / send ceilings. Empty keeps legacy
   # intake but DENIES all outgoing operations; explicit JSON {} denies all accounts.
   WHATSAPP_SCOPES: ${WHATSAPP_SCOPES:-}
+  WHATSAPP_HISTORY_BACKFILL_ENABLED: ${WHATSAPP_HISTORY_BACKFILL_ENABLED:-0}
   WHATSAPP_GROUP_ALLOWED_USERS: ${WHATSAPP_GROUP_ALLOWED_USERS:-}
   WHATSAPP_MODE: ${WHATSAPP_MODE:-bot}
   WHATSAPP_DM_POLICY: ${WHATSAPP_DM_POLICY:-}

@@ -280,3 +280,16 @@ test('pairing requires a name only when more than the implicit account exists', 
   assert.throws(() => accountForPairing(multi), /account name/);
   assert.equal(accountForPairing(multi, 'sales').name, 'sales');
 });
+
+test('backfill configuration defaults off and supports explicit per-account overrides', () => {
+  assert.equal(loadAccountConfigs({ env: { HOME: dir }, cwd: dir }).accounts[0].historyBackfillEnabled, false);
+  const cfg = loadAccountConfigs({ env: { WHATSAPP_HISTORY_BACKFILL_ENABLED: '1', WHATSAPP_ACCOUNTS: JSON.stringify([
+    { name: 'one', sessionDir: path.join(dir, 'one') },
+    { name: 'two', sessionDir: path.join(dir, 'two'), historyBackfillEnabled: false },
+  ]) }, cwd: dir });
+  assert.equal(cfg.accounts[0].historyBackfillEnabled, true);
+  assert.equal(cfg.accounts[1].historyBackfillEnabled, false);
+  mkdirSync(path.join(dir, 'accounts'));
+  writeFileSync(path.join(dir, 'accounts', 'one.env'), `WHATSAPP_SESSION_DIR=${path.join(dir, 'one')}\nWHATSAPP_HISTORY_BACKFILL_ENABLED=1\n`);
+  assert.equal(loadAccountConfigs({ env: {}, cwd: dir }).accounts[0].historyBackfillEnabled, true);
+});

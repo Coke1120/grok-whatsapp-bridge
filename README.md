@@ -212,3 +212,14 @@ See `.env.example`. Important:
 MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 For the source-built Mac mini Docker MCP setup, see [Docker MCP](docs/docker-mcp.md). The pinned v1.3.3 release image does not contain MCP.
+
+### Cached conversations and partial history (source feature)
+
+Authenticated, explicitly scoped REST/MCP clients can list cached conversations
+and page saved text/metadata without draining the live queue. A bounded private
+per-account cache does not imply complete phone history or attachment recovery.
+Optional provider backfill is an explicit default-off action requiring separate
+owner approval; it never grants trigger/send access or initiates deployment.
+See [conversation history](docs/conversation-history.md) for retention, pagination,
+activation and provider limitations. This requires the authenticated REST changes
+in PR #23 and is not available in the published v1.3.3 image.

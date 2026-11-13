@@ -136,7 +136,7 @@ jobs:
                   assert len(replies) == 5, output
                   results = {reply["id"]: reply["result"] for reply in replies if reply["jsonrpc"] == "2.0"}
                   assert set(results) == {1, 2, 3, 4, 5}, output
-                  assert len(results[3]["tools"]) == 4
+                  assert len(results[3]["tools"]) == 7
                   assert json.loads(results[4]["content"][0]["text"])[0]["messageId"] == "ci-only"
                   assert results[5]["isError"] and "disabled" in results[5]["content"][0]["text"]
                   print("Node 22 " + os.environ["TEST_ARCH"] + ": isolated MCP stdio and hardening passed")

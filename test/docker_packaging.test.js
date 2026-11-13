@@ -166,6 +166,7 @@ test('Docker image includes MCP and the durable listener delivery helper', () =>
   assert.match(docker, /^COPY mcp \.\/mcp$/m);
   assert.match(docker, /listener\.mjs listener_delivery\.mjs/);
   assert.match(docker, /COPY access_scopes\.js/);
+  assert.match(docker, /conversation_history\.js/);
 });
 
 test('MCP overlay builds current source and confines stdio without session access', () => {
@@ -208,11 +209,12 @@ assert env["WHATSAPP_SCOPES"] == "\${WHATSAPP_SCOPES:-}"
 assert base["services"]["bridge"]["environment"]["WHATSAPP_SCOPES"] == env["WHATSAPP_SCOPES"]
 assert base["services"]["listener"]["environment"]["WHATSAPP_SCOPES"] == env["WHATSAPP_SCOPES"]
 assert env["WHATSAPP_MCP_SEND_ENABLED"] == "\${WHATSAPP_MCP_SEND_ENABLED:-0}"
+assert env["WHATSAPP_MCP_HISTORY_BACKFILL_ENABLED"] == "\${WHATSAPP_MCP_HISTORY_BACKFILL_ENABLED:-0}"
 assert env["WHATSAPP_MCP_ALLOW_GROUPS"] == "\${WHATSAPP_MCP_ALLOW_GROUPS:-0}"
 assert env["WHATSAPP_MCP_ALLOW_REMOTE"] == "0"
 assert set(env) == {
     "HOME", "WHATSAPP_API_TOKEN", "WHATSAPP_BRIDGE_URL", "WHATSAPP_INBOX_PATH", "WHATSAPP_MCP_ALLOWED_CHATS",
-    "WHATSAPP_MCP_SEND_ENABLED", "WHATSAPP_MCP_ALLOW_GROUPS", "WHATSAPP_MCP_ALLOW_REMOTE", "WHATSAPP_SCOPES",
+    "WHATSAPP_MCP_SEND_ENABLED", "WHATSAPP_MCP_HISTORY_BACKFILL_ENABLED", "WHATSAPP_MCP_ALLOW_GROUPS", "WHATSAPP_MCP_ALLOW_REMOTE", "WHATSAPP_SCOPES",
 }
 assert mcp["healthcheck"] == {"disable": True}
 assert mcp["logging"] == {"driver": "none"}

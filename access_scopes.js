@@ -1,6 +1,7 @@
 // Explicit account + chat ceilings. No credentials, aliases or ambient state.
-export const ACCOUNT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
-export const CHAT_ID_RE = /^[a-zA-Z0-9._:-]+@(s\.whatsapp\.net|lid|g\.us)$/;
+export const ACCOUNT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$(?![\s\S])/;
+// An absolute end check rejects final newlines that JavaScript `$` alone accepts.
+export const CHAT_ID_RE = /^[a-zA-Z0-9._:-]+@(s\.whatsapp\.net|lid|g\.us)$(?![\s\S])/;
 export const isPrivateChat = (chatId) => typeof chatId === 'string'
   && CHAT_ID_RE.test(chatId) && !chatId.endsWith('@g.us');
 
