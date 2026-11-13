@@ -1,5 +1,8 @@
 # Docker and Synology
 
+For the version-only v2.0.0 release, see the [migration guide](release-v2.0.0.md).
+The base Compose pin remains legacy by design; upgrade requires a separate approved deployment.
+
 > **Security migration:** the old v1.3.3 image is not fixed by setting a token. A green healthcheck does not prove the old image enforces authentication. Do not deploy this base pin as an upgrade; wait for an approved fixed published release. See [migration](api-security.md).
 > **Optional / legacy ops path. Not Primary.**
 >

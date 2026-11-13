@@ -1,5 +1,8 @@
 # Authenticated REST API and fail-closed sending
 
+For the version-only v2.0.0 release, see the [migration guide](release-v2.0.0.md).
+The base Compose pin remains legacy by design; upgrade requires a separate approved deployment.
+
 This source update is a **breaking security migration**, not a deployment or
 permission to expand a linked account's access. Existing services and paired
 sessions are not changed by checking out or reviewing the code.

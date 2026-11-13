@@ -1,6 +1,7 @@
 # Cached conversations and partial message history
 
-This is a source-only feature built on the authenticated REST boundary in PR #23.
+This feature ships in v2.0.0, built on the authenticated REST boundary in PR #23.
+See the [explicit migration guide](release-v2.0.0.md).
 It is not present in the published v1.3.3 image. Merging this PR does not deploy it,
 change an access policy, initiate backfill, re-pair a phone or publish a release.
 
