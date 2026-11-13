@@ -12,6 +12,9 @@ import { parseAccessScopes, scopeForAccount } from '../access_scopes.js';
 import http from 'node:http';
 import { createBridgeApp } from '../account_http.js';
 
+const API_TOKEN = 'synthetic-fixture-token-00000000000001';
+const AUTH = { Authorization: `Bearer ${API_TOKEN}` };
+
 test('linked device browser name is WhatsApp Bridge', () => {
   const src = readFileSync(new URL('../account_runtime.js', import.meta.url), 'utf8');
   assert.match(src, /browser: \['WhatsApp Bridge', 'Chrome', '120\.0'\]/);
@@ -50,6 +53,7 @@ function createFakeSocket() {
   const handlers = new Map();
   const sent = [];
   const readKeys = [];
+  const presenceUpdates = [];
   const sock = {
     user: { id: '15550001111:1@s.whatsapp.net', name: 'Test' },
     ev: {
@@ -67,7 +71,7 @@ function createFakeSocket() {
       sent.push({ jid, payload, options });
       return { key: { id: `id-${sent.length}` }, message: payload };
     },
-    async sendPresenceUpdate() {},
+    async sendPresenceUpdate(...args) { presenceUpdates.push(args); },
     async readMessages(keys) {
       readKeys.push(keys);
     },
@@ -82,6 +86,7 @@ function createFakeSocket() {
     sock,
     sent,
     readKeys,
+    presenceUpdates,
     async emit(event, payload) {
       for (const fn of handlers.get(event) || []) await fn(payload);
     },
@@ -150,7 +155,7 @@ async function connect(handle) {
 test('a disconnected account does not send', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-'));
   try {
-    const handle = harness(dir);
+    const handle = harness(dir, { accessScope: scopedPolicy({ sendChats: ['111@s.whatsapp.net'] }) });
     const result = await handle.runtime.send({ chatId: '111@s.whatsapp.net', message: 'hi' });
     assert.equal(result.status, 503);
     assert.equal(result.body.error, 'Not connected to WhatsApp');
@@ -306,8 +311,9 @@ test('send queues are per account and self-chat still prefixes', async () => {
   const dirA = mkdtempSync(path.join(tmpdir(), 'wa-rt-'));
   const dirB = mkdtempSync(path.join(tmpdir(), 'wa-rt-'));
   try {
-    const a = harness(dirA, { name: 'ops', multi: true });
+    const a = harness(dirA, { name: 'ops', multi: true, accessScope: scopedPolicy({ sendChats: ['111@s.whatsapp.net'] }) });
     const b = harness(dirB, {
+      accessScope: scopedPolicy({ sendChats: ['111@s.whatsapp.net'] }),
       name: 'sales',
       multi: true,
       mode: 'self-chat',
@@ -338,7 +344,7 @@ test('send queues are per account and self-chat still prefixes', async () => {
 test('long text is split and read receipts follow the account flag', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-'));
   try {
-    const handle = harness(dir, { maxMessageLength: 4, sendReadReceipts: true });
+    const handle = harness(dir, { maxMessageLength: 4, sendReadReceipts: true, accessScope: scopedPolicy({ sendChats: ['111@s.whatsapp.net'] }) });
     await connect(handle);
     const sent = await handle.runtime.send({ chatId: '111@s.whatsapp.net', message: 'abcd efgh' });
     assert.equal(sent.status, 200);
@@ -351,7 +357,7 @@ test('long text is split and read receipts follow the account flag', async () =>
     assert.equal(marked.body.marked, true);
     assert.equal(handle.sockets[0].readKeys.length, 1);
 
-    const quiet = harness(dir, { name: 'quiet', sendReadReceipts: false });
+    const quiet = harness(dir, { name: 'quiet', sendReadReceipts: false, accessScope: scopedPolicy({ sendChats: ['111@s.whatsapp.net'] }) });
     await connect(quiet);
     const skipped = await quiet.runtime.markRead({
       key: { remoteJid: '111@s.whatsapp.net', id: 'abc', fromMe: false },
@@ -615,22 +621,22 @@ test('raw REST cannot bypass account-specific send ceilings or conflicting accou
     const ops = harness(path.join(dir, 'ops'), { name: 'ops', multi: true, accessScope: scopeForAccount(policies, 'ops') });
     const sales = harness(path.join(dir, 'sales'), { name: 'sales', multi: true, accessScope: scopeForAccount(policies, 'sales') });
     await connect(ops); await connect(sales);
-    server = http.createServer(createBridgeApp({ accounts: [ops.runtime, sales.runtime], defaultName: 'ops', multi: true }));
+    server = http.createServer(createBridgeApp({ apiToken: API_TOKEN, accounts: [ops.runtime, sales.runtime], defaultName: 'ops', multi: true }));
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const base = `http://127.0.0.1:${server.address().port}`;
-    const post = (p, chatId, headers = {}) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ chatId, message: 'synthetic fixture' }) });
+    const post = (p, chatId, headers = {}) => fetch(base + p, { method: 'POST', headers: { ...AUTH, 'content-type': 'application/json', ...headers }, body: JSON.stringify({ chatId, message: 'synthetic fixture' }) });
     assert.equal((await post('/accounts/sales/send', owner)).status, 403);
     assert.equal((await post('/send?account=sales', owner)).status, 403);
     assert.equal((await post('/send', other)).status, 403);
     assert.equal((await post('/send', owner, { 'x-whatsapp-account': 'sales' })).status, 403);
     assert.equal((await post('/accounts/ops/send?account=sales', owner)).status, 400);
-    assert.equal((await fetch(base + '/accounts/sales/chat/' + encodeURIComponent(owner))).status, 403);
+    assert.equal((await fetch(base + '/accounts/sales/chat/' + encodeURIComponent(owner), { headers: AUTH })).status, 403);
     assert.equal(ops.sockets[0].sent.length + sales.sockets[0].sent.length, 0);
     assert.equal((await post('/accounts/ops/send', owner)).status, 200);
     assert.equal((await post('/accounts/sales/send', other)).status, 200);
     assert.equal(ops.sockets[0].sent.length, 1);
     assert.equal(sales.sockets[0].sent.length, 1);
-    const health = await (await fetch(base + '/health')).json();
+    const health = await (await fetch(base + '/health', { headers: AUTH })).json();
     assert.equal(health.capabilities.independentScopes, true);
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));
@@ -706,5 +712,24 @@ test('scoped owner forwarding and self-chat preserve owner provenance and discar
       key: { remoteJid: '15550001111@s.whatsapp.net', id: 'self-manual', fromMe: true }, message: { conversation: 'self fixture' },
     }] });
     assert.equal(self.runtime.drainMessages()[0].fromOwner, true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('legacy runtime fails closed for every outgoing operation without explicit scopes', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wa-rt-legacy-deny-'));
+  try {
+    const handle = harness(dir, { allowedUsers: '*', sendReadReceipts: true });
+    await connect(handle);
+    const body = { chatId: '111@s.whatsapp.net', message: 'must not send', messageId: 'fixture',
+      filePath: '/never-read/private-file', question: 'fixture', options: ['A', 'B'], latitude: 1, longitude: 2,
+      key: { remoteJid: '111@s.whatsapp.net', id: 'fixture', fromMe: false } };
+    for (const method of ['send', 'edit', 'sendMedia', 'sendPoll', 'sendLocation', 'typing', 'markRead']) {
+      const result = await handle.runtime[method](body);
+      assert.equal(result.status, 403, method);
+      assert.match(result.body.error, /explicit WHATSAPP_SCOPES/);
+    }
+    assert.equal(handle.sockets[0].sent.length, 0);
+    assert.equal(handle.sockets[0].readKeys.length, 0);
+    assert.equal(handle.sockets[0].presenceUpdates.length, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

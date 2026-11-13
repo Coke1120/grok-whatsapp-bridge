@@ -10,6 +10,7 @@
 import { appendFileSync, writeFileSync, readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { bridgeAuthorizationHeaders } from './api_auth.js';
 import { loadAccountConfigs } from './accounts_config.js';
 import { canReadChat, canSendChat, canTriggerEvent } from './access_scopes.js';
 import { saveListenerState, webhookDestination, deliveryIdentity, retryableWebhookStatus, WAKE_RETRY_DELAYS, boundedInteger } from './listener_delivery.mjs';
@@ -91,6 +92,8 @@ export function classifyBridgeResponse(status, body) {
 }
 
 export function createInboxListener(options) {
+  // Validate before reading state, persisting records or making any request.
+  const bridgeHeaders = bridgeAuthorizationHeaders(options.apiToken);
   const bridge = options.bridge || 'http://127.0.0.1:37100';
   const multi = !!options.multi;
   const accounts = options.accounts || [];
@@ -256,7 +259,7 @@ export function createInboxListener(options) {
       if (!row.allowed) { log('[listener] drop (not allowlisted)'); continue; }
       writeFileSync(unreadFlagPath, `${state.processed}\n`, { mode: 0o600 });
 
-      if (target.ack && ev.chatId && (!scoped || canSendChat(target.scope, ev.chatId))) {
+      if (target.ack && ev.chatId && scoped && canSendChat(target.scope, ev.chatId)) {
         acknowledgements.push({ chatId: ev.chatId, deliveryId });
       }
     }
@@ -270,7 +273,7 @@ export function createInboxListener(options) {
         try {
           const response = await fetchImpl(target.sendUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...bridgeHeaders },
             body: JSON.stringify({ chatId, message: target.ack }),
             signal: AbortSignal.timeout(wakeTimeoutMs), redirect: 'error',
           });
@@ -371,7 +374,7 @@ export function createInboxListener(options) {
 
   async function readPoll(url) {
     try {
-      const response = await fetchImpl(url, { signal: AbortSignal.timeout(wakeTimeoutMs), redirect: 'error' });
+      const response = await fetchImpl(url, { headers: { ...bridgeHeaders }, signal: AbortSignal.timeout(wakeTimeoutMs), redirect: 'error' });
       const text = typeof response.text === 'function' ? await response.text() : '';
       let body = text;
       if (text) {
@@ -462,6 +465,7 @@ if (isDirectRun()) {
   const cfg = loadAccountConfigs({ env: process.env, cwd: process.cwd() });
   const paths = listenerArtifactPaths(process.env, __dirname);
   const listener = createInboxListener({
+    apiToken: process.env.WHATSAPP_API_TOKEN,
     bridge: process.env.WHATSAPP_BRIDGE_URL || 'http://127.0.0.1:37100',
     multi: cfg.multi,
     accounts: cfg.accounts,

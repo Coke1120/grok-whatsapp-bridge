@@ -37,6 +37,7 @@ import { createVersionResolver, installConsoleStamps, readReconnectTiming, resol
 import { accountForPairing, loadAccountConfigs, resolveRuntimeConfig } from './accounts_config.js';
 import { createBridgeApp, parseTrustedHosts } from './account_http.js';
 import { createAccountRuntime } from './account_runtime.js';
+import { requireApiToken } from './api_auth.js';
 import { formatAccountStartupLines, formatPairingLines } from './bridge_startup.js';
 
 installConsoleStamps();
@@ -99,6 +100,7 @@ function runtimeFor(account, shared) {
     forwardOwnerMessages: account.forwardOwnerMessages,
     sendReadReceipts: account.sendReadReceipts,
     accessScope: account.accessScope,
+    historyBackfillEnabled: account.historyBackfillEnabled,
     maxMessageLength: parseInt(process.env.WHATSAPP_MAX_MESSAGE_LENGTH || '4096', 10),
     chunkDelayMs: parseInt(process.env.WHATSAPP_CHUNK_DELAY_MS || '300', 10),
     sendTimeoutMs: parseInt(process.env.WHATSAPP_SEND_TIMEOUT_MS || '60000', 10),
@@ -154,6 +156,8 @@ export async function main(argvEnv = process.env) {
   }
 
   const host = resolveListenHost(argvEnv);
+  // Validate before constructing runtimes or touching linked-session state.
+  const apiToken = requireApiToken(argvEnv.WHATSAPP_API_TOKEN);
   const runtimes = config.accounts.map((account) => runtimeFor(account, shared));
   const app = createBridgeApp({
     accounts: runtimes,
@@ -161,6 +165,7 @@ export async function main(argvEnv = process.env) {
     multi: config.multi,
     scriptHash: scriptHash(),
     trustedHosts: parseTrustedHosts(argvEnv.WHATSAPP_TRUSTED_HOSTS),
+    apiToken,
   });
   if (host !== '127.0.0.1') {
     console.log(`HTTP bind ${host}:${port}. Publish this port on 127.0.0.1 only.`);

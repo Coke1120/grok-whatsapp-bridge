@@ -1,5 +1,6 @@
 # ADR 0004 — Separate reading, automatic triggers and outgoing destinations
 
+> Historical context: [ADR 0005](0005-authenticated-rest-boundary.md) supersedes the unauthenticated REST and legacy-send exceptions below. Current source requires a token and explicit send scopes.
 ## Status
 
 Accepted for implementation. Activation and broader account access require the

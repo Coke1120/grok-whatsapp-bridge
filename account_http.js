@@ -1,4 +1,5 @@
 import express from 'express';
+import { createApiAuthenticator } from './api_auth.js';
 
 const LOOPBACK_HOSTS = new Set([
   'localhost',
@@ -46,6 +47,7 @@ export function createBridgeApp({
   multi,
   scriptHash,
   trustedHosts = [],
+  apiToken,
   uptime = () => process.uptime(),
 }) {
   const byName = new Map(accounts.map((account) => [account.name, account]));
@@ -54,8 +56,9 @@ export function createBridgeApp({
     ...LOOPBACK_HOSTS,
     ...trustedHosts.map((host) => String(host).trim().toLowerCase()).filter(Boolean),
   ]);
+  const authenticate = createApiAuthenticator(apiToken);
   const app = express();
-  app.use(express.json());
+  app.disable('x-powered-by');
 
   app.use((req, res, next) => {
     const raw = (req.headers.host || '').trim();
@@ -69,6 +72,17 @@ export function createBridgeApp({
     }
     return next();
   });
+
+  // Authenticate before parsing any body or resolving an account. Every route,
+  // including health, destructive queue reads and administration, is protected.
+  app.use((req, res, next) => {
+    if (!authenticate(req)) {
+      res.set('WWW-Authenticate', 'Bearer');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    return next();
+  });
+  app.use(express.json());
 
   function sendJson(res, status, body, account) {
     let payload = body;
@@ -196,6 +210,33 @@ export function createBridgeApp({
         }
       });
     }
+
+    for (const [route, fnName, argsFor] of [
+      ['/chats', 'listChats', (req) => [req.query]],
+      ['/chat/:id/messages', 'chatMessages', (req) => [req.params.id, req.query]],
+    ]) {
+      app.get(`${prefix}${route}`, async (req, res) => {
+        const account = resolveAccount(req, res);
+        if (!account) return;
+        try {
+          const result = await account[fnName](...argsFor(req));
+          sendJson(res, result.status || 200, result.body, account);
+        } catch (err) {
+          sendJson(res, err.status || 500, { error: err.message || 'Internal error' }, account);
+        }
+      });
+    }
+
+    app.post(`${prefix}/chat/:id/history`, async (req, res) => {
+      const account = resolveAccount(req, res);
+      if (!account) return;
+      try {
+        const result = await account.requestHistory(req.params.id, req.body);
+        sendJson(res, result.status || 200, result.body, account);
+      } catch (err) {
+        sendJson(res, err.status || 500, { error: err.message || 'Internal error' }, account);
+      }
+    });
 
     app.get(`${prefix}/chat/:id`, async (req, res) => {
       const account = resolveAccount(req, res);

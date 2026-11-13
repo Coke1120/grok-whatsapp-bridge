@@ -8,10 +8,32 @@ import { createWhatsAppTools, readRecentInbox, validateBridgeUrl } from '../mcp/
 
 const JID = '85212345678@s.whatsapp.net';
 const BASE_ENV = {
+  WHATSAPP_API_TOKEN: 'fixture-bridge-token-not-a-secret-0001',
   WHATSAPP_BRIDGE_URL: 'http://127.0.0.1:37100',
   WHATSAPP_MCP_ALLOWED_CHATS: JID,
   WHATSAPP_MCP_SEND_ENABLED: '1',
 };
+
+test('local inbox tools work without a token but every HTTP tool requires valid authentication', async () => {
+  for (const token of [undefined, '', 'short', 'private-token-with-whitespace ']) {
+    let calls = 0;
+    const tools = createWhatsAppTools({
+      env: { ...BASE_ENV, WHATSAPP_API_TOKEN: token,
+        WHATSAPP_SCOPES: JSON.stringify({ default: { readChats: [JID], sendChats: [JID] } }) },
+      inboxReader: async () => [], fetchImpl: async () => { calls++; throw new Error('Must not fetch'); },
+    });
+    assert.deepEqual(JSON.parse((await tools.invoke('whatsapp_recent_messages')).content[0].text), []);
+    for (const [tool, args] of [['whatsapp_status', {}], ['whatsapp_chat_info', { chatId: JID }],
+      ['whatsapp_send_message', { chatId: JID, message: 'Fixture' }]]) {
+      await assert.rejects(tools.invoke(tool, args), (error) => {
+        assert.match(error.message, /WHATSAPP_API_TOKEN/);
+        if (token) assert.ok(!error.message.includes(token));
+        return true;
+      });
+    }
+    assert.equal(calls, 0);
+  }
+});
 
 test('bridge URL rejects remote, credentials and arbitrary URL paths', () => {
   assert.equal(validateBridgeUrl('http://127.0.0.1:37100'), 'http://127.0.0.1:37100');
@@ -28,13 +50,15 @@ test('MCP sends only with explicit allowlist and send switch', async () => {
     calls.push({ url, options });
     return new Response(JSON.stringify({ success: true, messageId: 'abc' }), { status: 200 });
   };
-  const tools = createWhatsAppTools({ env: BASE_ENV, fetchImpl });
+  const tools = createWhatsAppTools({ env: { ...BASE_ENV, WHATSAPP_SCOPES: JSON.stringify({ default: { sendChats: [JID] } }) }, fetchImpl });
   const result = await tools.invoke('whatsapp_send_message', { chatId: JID, message: 'Hello' });
   assert.equal(JSON.parse(result.content[0].text).messageId, 'abc');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'http://127.0.0.1:37100/send');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer ' + BASE_ENV.WHATSAPP_API_TOKEN);
+  assert.equal(calls[0].options.redirect, 'error');
+  assert.equal(calls[0].url, 'http://127.0.0.1:37100/accounts/default/send');
   assert.equal(JSON.parse(calls[0].options.body).chatId, JID);
-  await assert.rejects(tools.invoke('whatsapp_send_message', { chatId: '123@s.whatsapp.net', message: 'oops' }), /WHATSAPP_MCP_ALLOWED_CHATS/);
+  await assert.rejects(tools.invoke('whatsapp_send_message', { chatId: '123@s.whatsapp.net', message: 'oops' }), /WHATSAPP_SCOPES/);
   await assert.rejects(createWhatsAppTools({
     env: { ...BASE_ENV, WHATSAPP_MCP_SEND_ENABLED: '0' }, fetchImpl,
   }).invoke('whatsapp_send_message', { chatId: JID, message: 'no' }), /disabled/);
@@ -44,7 +68,7 @@ test('MCP sends only with explicit allowlist and send switch', async () => {
 test('groups require a second opt-in; wildcard is forbidden', async () => {
   const group = '12345@g.us';
   assert.throws(() => createWhatsAppTools({ env: { ...BASE_ENV, WHATSAPP_MCP_ALLOWED_CHATS: '*' } }), /Wildcard/);
-  const tools = createWhatsAppTools({ env: { ...BASE_ENV, WHATSAPP_MCP_ALLOWED_CHATS: group } });
+  const tools = createWhatsAppTools({ env: { ...BASE_ENV, WHATSAPP_SCOPES: JSON.stringify({ default: { sendChats: [group] } }) } });
   await assert.rejects(tools.invoke('whatsapp_send_message', { chatId: group, message: 'no' }), /Group access/);
 });
 

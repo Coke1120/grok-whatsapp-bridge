@@ -1,6 +1,6 @@
 # Independent read, trigger and send permissions
 
-This is an **opt-in** feature. Installing its code does not expand a live linked
+Broader reading and explicit send destinations are **opt-in**. Every REST request also requires a shared API token; see [security migration](api-security.md). Installing its code does not expand a live linked
 device's data access, restart services, pair another account, or authorize sends.
 
 ## Policy
@@ -35,7 +35,7 @@ WHATSAPP_MCP_ALLOW_GROUPS=0
 
 Missing fields are empty/false. Missing account policies deny that account.
 Explicit `{}` denies all accounts. Unset or empty `WHATSAPP_SCOPES` preserves
-legacy behavior, including the older unauthenticated REST send behavior. JSON
+legacy intake/read behavior but denies every outgoing operation. Sending always requires an explicit account `sendChats` entry. JSON
 `null`, unknown fields, non-boolean flags, malformed JIDs and wildcards are errors.
 Do not use `WHATSAPP_ALLOWED_USERS=*` as a substitute for this policy.
 
@@ -98,9 +98,9 @@ scope. Both account selectors and per-account destinations are enforced; changin
 the URL/header/query cannot borrow another account's permission. When enabled,
 `/health` includes `capabilities.independentScopes: true`.
 
-The API remains **unauthenticated**. Any process with local access can perform
-operations within the shared ceilings and use administrative routes such as
-pause/logout. It is not a per-client credential system. Keep loopback publishing,
+Every REST route requires `WHATSAPP_API_TOKEN`. Any holder of that shared token can perform
+operations within the bridge ceilings and use administrative routes such as
+pause/logout. Local network access alone is insufficient. It is not a per-client credential system. Keep loopback publishing,
 trusted Host checks, protected session/inbox files and no public exposure. A
 trusted administrator with host/Docker access can change the policy; do not
 claim these settings confine a hostile local administrator.
@@ -110,7 +110,8 @@ account's DMs the bot may continuously read, which chat may trigger it, which
 recipient may receive replies, and which information replies may contain. Do
 not treat an implementation request as that approval.
 
-After approval, build/test the new code, configure the policy consistently,
+After approval, build/test the new code, provision a fresh API token and configure
+the token and policy consistently,
 restart the existing bridge/listener and reconnect MCP without creating a second
 primary. Verify the health capability and perform synthetic denied-destination
 tests before a separately approved harmless real-message test. Do not delete

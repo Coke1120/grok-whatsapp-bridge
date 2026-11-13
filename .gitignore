@@ -15,3 +15,7 @@ compose.override.yml
 
 # Atomic listener state temporary files may contain private event payloads.
 listener-state.json.*.tmp
+
+# Private per-account history snapshots (normally inside ignored session dirs).
+conversation-history.json
+.conversation-history.*.tmp

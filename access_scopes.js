@@ -1,6 +1,7 @@
 // Explicit account + chat ceilings. No credentials, aliases or ambient state.
-export const ACCOUNT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
-export const CHAT_ID_RE = /^[a-zA-Z0-9._:-]+@(s\.whatsapp\.net|lid|g\.us)$/;
+export const ACCOUNT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$(?![\s\S])/;
+// An absolute end check rejects final newlines that JavaScript `$` alone accepts.
+export const CHAT_ID_RE = /^[a-zA-Z0-9._:-]+@(s\.whatsapp\.net|lid|g\.us)$(?![\s\S])/;
 export const isPrivateChat = (chatId) => typeof chatId === 'string'
   && CHAT_ID_RE.test(chatId) && !chatId.endsWith('@g.us');
 
@@ -18,8 +19,8 @@ function chatSet(value, field) {
   return new Set(value);
 }
 
-// Empty/unset preserves the legacy installation. An explicit {} denies every
-// account. Missing fields/accounts NEVER inherit a legacy or another account's
+// Empty/unset preserves legacy intake; outgoing handlers still require an
+// explicit send policy. An explicit {} denies every account. Missing fields/accounts NEVER inherit a legacy or another account's
 // permission. All-DM reading is a boolean opt-in, not a send/trigger wildcard.
 export function parseAccessScopes(raw) {
   if (raw === undefined || String(raw).trim() === '') return null;

@@ -80,3 +80,12 @@ test('configuration binds each account to its own policy and never uses legacy a
     assert.equal(canSendChat(config.accounts[1].accessScope, OWNER), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('scope JIDs and account names reject final newlines rather than treating groups as DMs', () => {
+  for (const suffix of ['\n', '\r', '\u2028']) {
+    assert.throws(() => parseAccessScopes(JSON.stringify({ default: { readChats: ['123@g.us' + suffix] } })));
+    assert.throws(() => parseAccessScopes(JSON.stringify({ ['default' + suffix]: { readAllDms: true } })));
+    const policy = scopeForAccount(parseAccessScopes(JSON.stringify({ default: { readAllDms: true } })), 'default');
+    assert.equal(canReadChat(policy, '123@g.us' + suffix), false);
+  }
+});

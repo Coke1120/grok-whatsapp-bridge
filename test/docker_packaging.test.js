@@ -46,7 +46,15 @@ assert "build" not in listener and "build" not in pair
 assert bridge["environment"]["WHATSAPP_BIND_HOST"] == "0.0.0.0"
 assert bridge["environment"]["WHATSAPP_TRUSTED_HOSTS"] == "\${WHATSAPP_TRUSTED_HOSTS:-bridge}"
 assert bridge["environment"]["WHATSAPP_SESSION_DIR"] == "/app/session"
-assert "/health" in " ".join(bridge["healthcheck"]["test"])
+assert bridge["healthcheck"]["test"][:3] == ["CMD", "node", "-e"]
+health = bridge["healthcheck"]["test"][3]
+assert "process.env.WHATSAPP_API_TOKEN" in health
+assert "Authorization:" in health and "redirect:'error'" in health
+assert "AbortSignal.timeout(4000)" in health
+assert "/health" in health
+assert bridge["environment"]["WHATSAPP_API_TOKEN"] == "\${WHATSAPP_API_TOKEN:-}"
+assert listener["environment"]["WHATSAPP_API_TOKEN"] == bridge["environment"]["WHATSAPP_API_TOKEN"]
+assert pair["environment"]["WHATSAPP_API_TOKEN"] == bridge["environment"]["WHATSAPP_API_TOKEN"]
 assert "wa-session:/app/session" in bridge["volumes"]
 assert "wa-sessions:/app/sessions" in bridge["volumes"]
 assert listener["profiles"] == ["listener"]
@@ -78,7 +86,7 @@ test('unset bridge HTTP port defaults to 37100', () => {
 
   const docker = read('Dockerfile');
   assert.match(docker, /WHATSAPP_BRIDGE_PORT=37100/);
-  assert.match(docker, /WHATSAPP_BRIDGE_PORT\|\|'37100'/);
+  assert.match(read('bridge_http_client.mjs'), /WHATSAPP_BRIDGE_PORT \|\| '37100'/);
   assert.doesNotMatch(docker, /3100/);
 
   for (const name of [
@@ -147,7 +155,7 @@ test('Dockerfile is a Node 22 multi-stage image that healthchecks /health', () =
   }
   assert.match(docker, /npm ci --omit=dev/);
   assert.match(docker, /setpriv/);
-  assert.match(docker, /\/health/);
+  assert.match(docker, /bridge_http_client\.mjs.*, \"health\"/);
   assert.doesNotMatch(docker, /^EXPOSE /m);
   assert.match(docker, /ENTRYPOINT \["\/usr\/local\/bin\/docker-entrypoint\.sh"\]/);
   assert.match(docker, /CMD \["bridge"\]/);
@@ -158,6 +166,7 @@ test('Docker image includes MCP and the durable listener delivery helper', () =>
   assert.match(docker, /^COPY mcp \.\/mcp$/m);
   assert.match(docker, /listener\.mjs listener_delivery\.mjs/);
   assert.match(docker, /COPY access_scopes\.js/);
+  assert.match(docker, /conversation_history\.js/);
 });
 
 test('MCP overlay builds current source and confines stdio without session access', () => {
@@ -192,6 +201,7 @@ assert mcp["volumes"] == [{
     "type": "volume", "source": "wa-listener", "target": "/app/listener-data", "read_only": True,
 }]
 env = mcp["environment"]
+assert env["WHATSAPP_API_TOKEN"] == base["services"]["bridge"]["environment"]["WHATSAPP_API_TOKEN"]
 assert env["WHATSAPP_BRIDGE_URL"] == "http://127.0.0.1:\${WHATSAPP_BRIDGE_PORT:-37100}"
 assert env["WHATSAPP_INBOX_PATH"] == "/app/listener-data/inbox.jsonl"
 assert env["WHATSAPP_MCP_ALLOWED_CHATS"] == "\${WHATSAPP_MCP_ALLOWED_CHATS:-}"
@@ -199,11 +209,12 @@ assert env["WHATSAPP_SCOPES"] == "\${WHATSAPP_SCOPES:-}"
 assert base["services"]["bridge"]["environment"]["WHATSAPP_SCOPES"] == env["WHATSAPP_SCOPES"]
 assert base["services"]["listener"]["environment"]["WHATSAPP_SCOPES"] == env["WHATSAPP_SCOPES"]
 assert env["WHATSAPP_MCP_SEND_ENABLED"] == "\${WHATSAPP_MCP_SEND_ENABLED:-0}"
+assert env["WHATSAPP_MCP_HISTORY_BACKFILL_ENABLED"] == "\${WHATSAPP_MCP_HISTORY_BACKFILL_ENABLED:-0}"
 assert env["WHATSAPP_MCP_ALLOW_GROUPS"] == "\${WHATSAPP_MCP_ALLOW_GROUPS:-0}"
 assert env["WHATSAPP_MCP_ALLOW_REMOTE"] == "0"
 assert set(env) == {
-    "HOME", "WHATSAPP_BRIDGE_URL", "WHATSAPP_INBOX_PATH", "WHATSAPP_MCP_ALLOWED_CHATS",
-    "WHATSAPP_MCP_SEND_ENABLED", "WHATSAPP_MCP_ALLOW_GROUPS", "WHATSAPP_MCP_ALLOW_REMOTE", "WHATSAPP_SCOPES",
+    "HOME", "WHATSAPP_API_TOKEN", "WHATSAPP_BRIDGE_URL", "WHATSAPP_INBOX_PATH", "WHATSAPP_MCP_ALLOWED_CHATS",
+    "WHATSAPP_MCP_SEND_ENABLED", "WHATSAPP_MCP_HISTORY_BACKFILL_ENABLED", "WHATSAPP_MCP_ALLOW_GROUPS", "WHATSAPP_MCP_ALLOW_REMOTE", "WHATSAPP_SCOPES",
 }
 assert mcp["healthcheck"] == {"disable": True}
 assert mcp["logging"] == {"driver": "none"}
