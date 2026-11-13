@@ -10,7 +10,9 @@
 import { appendFileSync, writeFileSync, readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { bridgeAuthorizationHeaders } from './api_auth.js';
 import { loadAccountConfigs } from './accounts_config.js';
+import { canReadChat, canSendChat, canTriggerEvent } from './access_scopes.js';
 import { saveListenerState, webhookDestination, deliveryIdentity, retryableWebhookStatus, WAKE_RETRY_DELAYS, boundedInteger } from './listener_delivery.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -90,6 +92,8 @@ export function classifyBridgeResponse(status, body) {
 }
 
 export function createInboxListener(options) {
+  // Validate before reading state, persisting records or making any request.
+  const bridgeHeaders = bridgeAuthorizationHeaders(options.apiToken);
   const bridge = options.bridge || 'http://127.0.0.1:37100';
   const multi = !!options.multi;
   const accounts = options.accounts || [];
@@ -158,6 +162,7 @@ export function createInboxListener(options) {
         messagesUrl: multi ? `${bridge}/accounts/${name}/messages` : `${bridge}/messages`,
         sendUrl: multi ? `${bridge}/accounts/${name}/send` : `${bridge}/send`,
         allow: parseAllowlist(account?.allowedUsers || ''),
+        scope: account?.accessScope ?? null,
         ack: chosen(account?.programmaticAck, defaultAck),
         wakeUrl: String(chosen(account?.wakeWebhookUrl, defaultWakeUrl) || '').trim(),
         wakeAuth: String(chosen(account?.wakeWebhookAuth, defaultWakeAuth) || '').trim(),
@@ -168,6 +173,9 @@ export function createInboxListener(options) {
   function banner() {
     if (!multi) {
       const target = targets()[0];
+      if (target.scope !== null) {
+        return `[listener] bridge=${bridge} independent-scopes=on ack=${target.ack ? 'on' : 'off'} wake=${target.wakeUrl ? 'on' : 'off'}`;
+      }
       return `[listener] bridge=${bridge} allow=${[...target.allow].join(',')} ack=${target.ack ? 'on' : 'off'} wake=${target.wakeUrl ? 'on' : 'off'}`;
     }
     const names = accounts.map((account) => account.name).join(',');
@@ -186,6 +194,10 @@ export function createInboxListener(options) {
     if (!Array.isArray(messages) || !messages.length) return;
     const acknowledgements = [];
     for (const ev of messages) {
+      const scoped = target.scope !== null;
+      // Do not copy rejected bodies to disk, logs, or a webhook. Bind to the
+      // polled account; a supplied event account cannot change the destination.
+      if (scoped && ((ev.account != null && ev.account !== target.name) || !canReadChat(target.scope, ev.chatId))) continue;
       const messageId = ev.messageId || ev.id || null;
       const rawId = messageId || `${ev.chatId}:${ev.ts || ''}:${ev.body || ''}`;
       // Include chat and account so a message ID from another conversation does
@@ -197,13 +209,19 @@ export function createInboxListener(options) {
         ts: new Date(now()).toISOString(),
         messageId,
         deliveryId,
-        allowed: eventAllowed(ev, target.allow),
+        allowed: scoped ? canTriggerEvent(target.scope, ev) : eventAllowed(ev, target.allow),
         chatId: ev.chatId,
         senderId: ev.senderId,
         senderName: ev.senderName,
         body: ev.body,
         hasMedia: !!ev.hasMedia,
       };
+      if (scoped) {
+        row.readAllowed = true;
+        row.scopeVersion = ev.scopeVersion;
+        row.eventType = ev.eventType;
+        row.fromOwner = ev.fromOwner;
+      }
       if (multi) row.account = target.name;
       appendFileSync(inboxPath, `${JSON.stringify(row)}\n`, { mode: 0o600 });
       state.seen.push(deliveryId);
@@ -221,6 +239,11 @@ export function createInboxListener(options) {
             hasMedia: row.hasMedia,
             ts: row.ts,
           };
+          if (scoped) {
+            payload.scopeVersion = row.scopeVersion;
+            payload.eventType = row.eventType;
+            payload.fromOwner = row.fromOwner;
+          }
           if (multi) payload.account = target.name;
           state.pendingWakes.push({
             deliveryId, account: target.name, destination: webhookDestination(target),
@@ -231,11 +254,14 @@ export function createInboxListener(options) {
       // Persist before any webhook or acknowledgement. A crash can duplicate an
       // inbox log row, but cannot send an unrecorded wake intentionally.
       saveState();
-      log(`[listener] inbound ${JSON.stringify(row)}`);
+      if (scoped) log(`[listener] observed ${deliveryId} read=on trigger=${row.allowed ? 'on' : 'off'}`);
+      else log(`[listener] inbound ${JSON.stringify(row)}`);
       if (!row.allowed) { log('[listener] drop (not allowlisted)'); continue; }
       writeFileSync(unreadFlagPath, `${state.processed}\n`, { mode: 0o600 });
 
-      if (target.ack && ev.chatId) acknowledgements.push({ chatId: ev.chatId, deliveryId });
+      if (target.ack && ev.chatId && scoped && canSendChat(target.scope, ev.chatId)) {
+        acknowledgements.push({ chatId: ev.chatId, deliveryId });
+      }
     }
     // The whole destructively drained batch is persisted before the first
     // outbound request can block or the process can yield to network work.
@@ -247,7 +273,7 @@ export function createInboxListener(options) {
         try {
           const response = await fetchImpl(target.sendUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...bridgeHeaders },
             body: JSON.stringify({ chatId, message: target.ack }),
             signal: AbortSignal.timeout(wakeTimeoutMs), redirect: 'error',
           });
@@ -271,7 +297,10 @@ export function createInboxListener(options) {
       if (count++ >= maxWakesPerTick) break;
       const target = targets().find((candidate) => candidate.name === item.account);
       // A configuration change must never redirect old mail to a new recipient.
-      if (!target?.wakeUrl || webhookDestination(target) !== item.destination || !eventAllowed(item.payload, target.allow)) {
+      const stillAllowed = target && (target.scope !== null
+        ? canTriggerEvent(target.scope, item.payload) && (!multi || item.payload.account === target.name)
+        : eventAllowed(item.payload, target.allow));
+      if (!target?.wakeUrl || webhookDestination(target) !== item.destination || !stillAllowed) {
         item.status = 'blocked'; item.lastFailure = 'configuration_changed'; saveState();
         warn(`[listener] wake blocked ${item.deliveryId} (configuration_changed)`);
         continue;
@@ -345,7 +374,7 @@ export function createInboxListener(options) {
 
   async function readPoll(url) {
     try {
-      const response = await fetchImpl(url, { signal: AbortSignal.timeout(wakeTimeoutMs), redirect: 'error' });
+      const response = await fetchImpl(url, { headers: { ...bridgeHeaders }, signal: AbortSignal.timeout(wakeTimeoutMs), redirect: 'error' });
       const text = typeof response.text === 'function' ? await response.text() : '';
       let body = text;
       if (text) {
@@ -436,6 +465,7 @@ if (isDirectRun()) {
   const cfg = loadAccountConfigs({ env: process.env, cwd: process.cwd() });
   const paths = listenerArtifactPaths(process.env, __dirname);
   const listener = createInboxListener({
+    apiToken: process.env.WHATSAPP_API_TOKEN,
     bridge: process.env.WHATSAPP_BRIDGE_URL || 'http://127.0.0.1:37100',
     multi: cfg.multi,
     accounts: cfg.accounts,

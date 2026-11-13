@@ -1,5 +1,6 @@
 # ADR 0002 — Docker publishes loopback; sessions stay on volumes
 
+> Historical context: [ADR 0005](0005-authenticated-rest-boundary.md) supersedes the unauthenticated REST and legacy-send exceptions below. Current source requires a token and explicit send scopes.
 ## Status
 
 Accepted. 2026-10-21.

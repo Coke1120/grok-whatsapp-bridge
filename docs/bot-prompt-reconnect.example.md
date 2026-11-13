@@ -16,7 +16,7 @@ You maintain a WhatsApp Baileys HTTP bridge (`bridge.js` + optional `listener.mj
 
 ```bash
 pgrep -af 'bridge.js|listener.mjs'
-curl -sS http://127.0.0.1:37100/health
+printf 'Authorization: Bearer %s\n' "${WHATSAPP_API_TOKEN:?export WHATSAPP_API_TOKEN first}" | curl --header @- -sS http://127.0.0.1:37100/health
 # optional: tail bridge log for loggedOut vs brief 408
 ```
 

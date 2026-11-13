@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import test from 'node:test';
-import { createBridgeApp, parseTrustedHosts } from '../account_http.js';
+import { createBridgeApp as createAuthenticatedApp, parseTrustedHosts } from '../account_http.js';
+
+const API_TOKEN = 'synthetic-fixture-token-00000000000001';
+const createBridgeApp = (options) => createAuthenticatedApp({ apiToken: API_TOKEN, ...options });
 
 function fakeAccount(name, overrides = {}) {
   const calls = [];
@@ -87,6 +90,7 @@ async function req(port, method, urlPath, { headers = {}, body } = {}) {
   const response = await fetch(`http://127.0.0.1:${port}${urlPath}`, {
     method,
     headers: {
+      Authorization: `Bearer ${API_TOKEN}`,
       ...headers,
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
     },
@@ -325,7 +329,7 @@ test('Compose service name is opt-in and other hosts stay rejected', async () =>
         port,
         path: '/health',
         method: 'GET',
-        headers: { host },
+        headers: { host, Authorization: `Bearer ${API_TOKEN}` },
       }, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
