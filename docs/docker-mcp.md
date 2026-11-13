@@ -1,5 +1,8 @@
 # Docker stdio MCP on a Mac mini
 
+For the version-only v2.0.0 release, see the [migration guide](release-v2.0.0.md).
+The base Compose pin remains legacy by design; upgrade requires a separate approved deployment.
+
 The MCP adapter is an optional, attached stdio process. It adds no HTTP server
 or published port. The existing bridge, listener and pairing commands remain
 available, with the same named session and listener volumes.

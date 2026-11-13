@@ -1,5 +1,6 @@
 # Build linux/amd64 + linux/arm64 and push to GHCR.
-# Tags: :<version> and :latest. No release-asset tarballs.
+# Tags: :<version> only. Keep :latest unchanged across the v2 migration.
+# No release-asset tarballs.
 #
 # Triggers:
 #   - GitHub Release published (tag must be vX.Y.Z)
@@ -24,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Git tag to build and push (example v1.3.2). Also pushes :latest."
+        description: "Git tag to build and push (example v1.3.2). Version tag only; never moves :latest."
         required: true
         type: string
 
@@ -114,7 +115,6 @@ jobs:
           sbom: false
           tags: |
             ${{ env.IMAGE }}:${{ needs.resolve.outputs.tag }}
-            ${{ env.IMAGE }}:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=MIT
@@ -162,7 +162,7 @@ jobs:
             echo "### GHCR image"
             echo ""
             echo "- \`${IMAGE}:${{ needs.resolve.outputs.tag }}\`"
-            echo "- \`${IMAGE}:latest\`"
+            echo "- Version-only publication; :latest is intentionally unchanged"
             echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
             echo "- No release tarball attached"
           } >> "$GITHUB_STEP_SUMMARY"
